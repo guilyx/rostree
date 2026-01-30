@@ -22,20 +22,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
       - name: Install dependencies
-        run: uv pip install -e ".[dev]"
+        run: pip install -e ".[dev]"
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: ruff check src tests
 
       - name: Black
-        run: uv run black --check src tests
+        run: black --check src tests
 
       - name: Pytest
-        run: uv run pytest tests -v
+        run: pytest tests -v
