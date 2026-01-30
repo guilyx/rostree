@@ -18,6 +18,7 @@ jobs:
         with:
           python-version: '3.11'
 
+<<<<<<< Updated upstream
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -33,3 +34,14 @@ jobs:
       - name: Pytest (backend)
         working-directory: rosdep_viz_webapp/backend
         run: uv run pytest tests -v
+=======
+      - name: Install library
+        run: pip install -e .
+
+      - name: Install backend
+        run: pip install -e "rosdep_viz_webapp/backend[dev]"
+
+      - name: Pytest (backend)
+        working-directory: rosdep_viz_webapp/backend
+        run: pytest tests -v
+>>>>>>> Stashed changes
