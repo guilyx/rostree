@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from rosdep_viz.core.parser import parse_package_xml
 
@@ -13,7 +12,8 @@ def test_parse_package_xml_not_found() -> None:
 
 def test_parse_package_xml_real(tmp_path: Path) -> None:
     pkg = tmp_path / "package.xml"
-    pkg.write_text("""<?xml version="1.0"?>
+    pkg.write_text(
+        """<?xml version="1.0"?>
 <package format="3">
   <name>test_pkg</name>
   <version>1.2.3</version>
@@ -22,7 +22,8 @@ def test_parse_package_xml_real(tmp_path: Path) -> None:
   <exec_depend>std_msgs</exec_depend>
   <build_depend>ament_cmake</build_depend>
 </package>
-""")
+"""
+    )
     info = parse_package_xml(pkg)
     assert info is not None
     assert info.name == "test_pkg"
