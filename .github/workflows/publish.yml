@@ -1,0 +1,42 @@
+# Publish rosdep-viz to PyPI.
+# Setup: In PyPI (pypi.org) → Your project → Publishing → Add a new trusted publisher:
+#   - Build system: GitHub Actions
+#   - Owner/repo: <your-org>/rosdep_viz
+#   - Workflow: publish.yml
+#   - Environment: (leave empty or use "pypi")
+# Then remove the "environment: pypi" key below if you did not create that env.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

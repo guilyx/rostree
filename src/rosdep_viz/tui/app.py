@@ -17,9 +17,17 @@ def _populate_textual_tree(tn: TreeNode, node: Any) -> None:
     """Recursively add DependencyNode children to a Textual TreeNode."""
     for child in node.children:
         label = f"[dim]{child.name}[/] [dim]({child.version or '?'})[/]"
-        if child.description and child.description not in ("(not found)", "(cycle)", "(parse error)"):
+        if child.description and child.description not in (
+            "(not found)",
+            "(cycle)",
+            "(parse error)",
+        ):
             # Truncate long descriptions in tree label
-            desc = child.description[:40] + "…" if len(child.description) > 40 else child.description
+            desc = (
+                child.description[:40] + "…"
+                if len(child.description) > 40
+                else child.description
+            )
             label = f"{child.name} [dim]— {desc}[/]"
         child_tn = tn.add(label, expand=False)
         child_tn.data = child
@@ -55,7 +63,9 @@ class DepTreeApp(App[None]):
         else:
             packages = list_known_packages()
             if not packages:
-                self._set_details("No ROS 2 packages found. Set AMENT_PREFIX_PATH or run from a workspace.")
+                self._set_details(
+                    "No ROS 2 packages found. Set AMENT_PREFIX_PATH or run from a workspace."
+                )
                 tree.root.add_leaf("[dim]No packages in environment[/]")
                 return
             # Show list of packages as roots; user can expand to see deps on demand
@@ -65,7 +75,9 @@ class DepTreeApp(App[None]):
                 tn.data = name
             if len(packages) > 200:
                 tree.root.add_leaf(f"[dim]… and {len(packages) - 200} more[/]")
-            self._set_details(f"Found {len(packages)} packages. Select a package to load its dependency tree.")
+            self._set_details(
+                f"Found {len(packages)} packages. Select a package to load its dependency tree."
+            )
             return
         self._render_tree(tree)
 
@@ -82,7 +94,9 @@ class DepTreeApp(App[None]):
             return
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
-        tree.root.label = f"[bold]{self._root_node.name}[/] [dim]v{self._root_node.version or '?'}[/]"
+        tree.root.label = (
+            f"[bold]{self._root_node.name}[/] [dim]v{self._root_node.version or '?'}[/]"
+        )
         tree.root.data = self._root_node
         _populate_textual_tree(tree.root, self._root_node)
         tree.root.expand_all()
@@ -91,7 +105,9 @@ class DepTreeApp(App[None]):
     def _render_tree(self, tree: Tree) -> None:
         if self._root_node is None:
             return
-        tree.root.label = f"[bold]{self._root_node.name}[/] [dim]v{self._root_node.version or '?'}[/]"
+        tree.root.label = (
+            f"[bold]{self._root_node.name}[/] [dim]v{self._root_node.version or '?'}[/]"
+        )
         tree.root.data = self._root_node
         _populate_textual_tree(tree.root, self._root_node)
         tree.root.expand_all()
@@ -141,7 +157,7 @@ class DepTreeApp(App[None]):
 
 
 def main() -> None:
-    """Entry point for the rosdep-viz CLI."""
+    """Entry point for the rosdep_viz CLI."""
     root = None
     if len(sys.argv) > 1:
         root = sys.argv[1].strip()

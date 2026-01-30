@@ -1,0 +1,31 @@
+# See https://pre-commit.com for usage
+# Install: pre-commit install && pre-commit install --hook-type commit-msg
+
+default_language_version:
+  python: python3
+
+repos:
+  # Conventional commit message (fix:, feat:, chore:, etc.)
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, chore, docs, style, refactor, test]
+
+  # Ruff (library + backend)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src/|tests/|rosdep_viz_webapp/backend/)
+
+  # Black (library + backend)
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=100]
+        files: ^(src/|tests/|rosdep_viz_webapp/backend/)

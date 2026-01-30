@@ -1,5 +1,5 @@
 [project]
-name = "rosdep-viz"
+name = "rosdep_viz"
 version = "0.1.0"
 description = "Visualize ROS 2 package dependencies as a navigable tree (library, TUI, API)"
 readme = "README.md"
@@ -22,13 +22,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "black>=24.0.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
 ]
 
 [project.scripts]
-rosdep-viz = "rosdep_viz.tui.app:main"
+rosdep_viz = "rosdep_viz.tui.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -43,6 +44,17 @@ include = ["src/rosdep_viz"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  \.git
+  | \.venv
+)/
+'''
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

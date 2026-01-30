@@ -31,10 +31,10 @@ Requires a ROS 2 environment (e.g. `source /opt/ros/<distro>/setup.bash` and/or 
 
 ```bash
 # List known packages and select one to explore
-rosdep-viz
+rosdep_viz
 
 # Open tree for a specific package
-rosdep-viz rosbag2_bringup
+rosdep_viz rosbag2_bringup
 ```
 
 Keys: `q` quit, `r` refresh, `e` expand all, `c` collapse all. Select a node to see details.
@@ -56,6 +56,16 @@ if root:
     print(root.name, root.version, len(root.children))
     # Serialize for JSON/API
     data = root.to_dict()
+```
+
+## Development
+
+Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/) (e.g. `fix:`, `feat:`, `chore:`). Pre-commit runs ruff and black and enforces this.
+
+```bash
+pip install pre-commit   # or: uv pip install pre-commit
+pre-commit install
+pre-commit install --hook-type commit-msg
 ```
 
 ## Layout
