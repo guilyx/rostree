@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: #0f1419;
+  --surface-elevated: #1a2332;
+  --accent: #22d3ee;
+  --accent-muted: #0891b2;
+  --edge: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* React Flow overrides */
+.react-flow__node {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.react-flow__edge-path {
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+.react-flow__background {
+  background: var(--surface);
+}

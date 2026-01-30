@@ -24,9 +24,7 @@ def _populate_textual_tree(tn: TreeNode, node: Any) -> None:
         ):
             # Truncate long descriptions in tree label
             desc = (
-                child.description[:40] + "…"
-                if len(child.description) > 40
-                else child.description
+                child.description[:40] + "…" if len(child.description) > 40 else child.description
             )
             label = f"{child.name} [dim]— {desc}[/]"
         child_tn = tn.add(label, expand=False)

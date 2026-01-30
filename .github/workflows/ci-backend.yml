@@ -1,0 +1,35 @@
+name: CI (backend)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install library
+        run: uv pip install -e .
+
+      - name: Install backend
+        run: uv pip install -e "rosdep_viz_webapp/backend[dev]"
+
+      - name: Pytest (backend)
+        working-directory: rosdep_viz_webapp/backend
+        run: uv run pytest tests -v
