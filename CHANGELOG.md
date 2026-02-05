@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.2] - 2026-01-30
+## [0.2.2] - 2026-02-05
 
 ### Added
 
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI uses cached packages from background scan for instant navigation
 - Refresh action (`r`) now clears cache and rescans in background
 
-## [0.2.1] - 2026-01-30
+## [0.2.1] - 2026-02-05
 
 ### Fixed
 
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Version is now sourced from `importlib.metadata` for single source of truth (pyproject.toml)
 
-## [0.2.0] - 2026-01-30
+## [0.2.0] - 2026-02-05
 
 ### Added
 
