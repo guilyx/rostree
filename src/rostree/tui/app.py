@@ -8,9 +8,9 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Static, Tree
+from textual.widgets import Footer, Header, Input, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from rostree.api import build_tree, list_known_packages_by_source
@@ -267,11 +267,12 @@ class DepTreeApp(App[None]):
         self._extra_source_roots: list[Path] = []
 
     DEFAULT_CSS = """
-    #back_bar {
+    #nav_hint {
         display: none;
         height: auto;
         padding: 0 1;
         margin-bottom: 1;
+        color: $text-muted;
     }
     #details {
         padding: 1 2;
@@ -283,11 +284,13 @@ class DepTreeApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal(id="back_bar"):
-            yield Button("← Back to package list", id="back_btn", variant="primary")
+        yield Static(
+            "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
+            id="nav_hint",
+        )
         yield Tree("Dependencies", id="dep_tree")
         yield Static(
-            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Tab[/] = switch focus  ·  [dim]Esc[/]/[dim]b[/] = Back",
+            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
             id="details",
         )
         yield Footer()
@@ -317,7 +320,7 @@ class DepTreeApp(App[None]):
     def _start_main(self) -> None:
         try:
             try:
-                self.query_one("#back_bar").styles.display = "none"
+                self.query_one("#nav_hint").styles.display = "none"
             except Exception:
                 pass
             tree = self.query_one("#dep_tree", Tree)
@@ -413,12 +416,9 @@ class DepTreeApp(App[None]):
             _expand_to_depth(tree.root, EXPAND_DEPTH_DEFAULT)
         except Exception:
             pass
-        self._set_details(
-            self._format_node(self._root_node)
-            + "\n\n[dim]Esc[/] or [dim]b[/] = Back to package list  ·  [dim]Tab[/] then [dim]Enter[/] = Back button"
-        )
+        self._set_details(self._format_node(self._root_node))
         try:
-            self.query_one("#back_bar").styles.display = "block"
+            self.query_one("#nav_hint").styles.display = "block"
             self.query_one("#dep_tree", Tree).focus()
         except Exception:
             pass
@@ -468,16 +468,12 @@ class DepTreeApp(App[None]):
         self._root_package = None
         self._root_node = None
         try:
-            self.query_one("#back_bar").styles.display = "none"
+            self.query_one("#nav_hint").styles.display = "none"
         except Exception:
             pass
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
         self._start_main()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "back_btn":
-            self.action_back()
 
     def action_refresh(self) -> None:
         if not self._main_started:
