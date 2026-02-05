@@ -20,7 +20,9 @@ from rostree.cli import (
     _collect_edges,
     _mermaid_id,
     _check_graphviz,
+    _check_matplotlib,
     _render_dot,
+    _render_with_matplotlib,
 )
 from rostree.core.tree import DependencyNode
 
@@ -1240,3 +1242,135 @@ class TestGraphvizHelpers:
         result = _render_dot(dot_content, output, "png")
         assert result is True
         assert output.exists()
+
+
+class TestMatplotlibHelpers:
+    """Tests for matplotlib rendering helper functions."""
+
+    def test_check_matplotlib(self) -> None:
+        """Test matplotlib check returns bool."""
+
+        result = _check_matplotlib()
+        assert isinstance(result, bool)
+
+    def test_check_matplotlib_not_installed(self) -> None:
+        """Test matplotlib check when not installed."""
+
+        with mock.patch.dict("sys.modules", {"matplotlib": None, "networkx": None}):
+            # Force re-import check by mocking import
+            import importlib
+
+            import rostree.cli
+
+            importlib.reload(rostree.cli)
+            # The check function uses try/except so needs different mock
+            with mock.patch(
+                "rostree.cli._check_matplotlib",
+                return_value=False,
+            ):
+                from rostree.cli import _check_matplotlib
+
+                result = _check_matplotlib()
+                assert result is False
+
+    def test_render_with_matplotlib_success(self, tmp_path: Path) -> None:
+        """Test matplotlib rendering succeeds."""
+        from rostree.cli import _check_matplotlib
+
+        if not _check_matplotlib():
+            return  # Skip if matplotlib not installed
+
+        edges = {("A", "B"), ("B", "C")}
+        root_names = {"A"}
+        output = tmp_path / "test.png"
+
+        result = _render_with_matplotlib(edges, root_names, output, "png", "Test Graph")
+        assert result is True
+        assert output.exists()
+        assert output.stat().st_size > 0
+
+    def test_render_with_matplotlib_svg(self, tmp_path: Path) -> None:
+        """Test matplotlib rendering to SVG."""
+        from rostree.cli import _check_matplotlib
+
+        if not _check_matplotlib():
+            return  # Skip if matplotlib not installed
+
+        edges = {("pkg1", "pkg2")}
+        root_names = {"pkg1"}
+        output = tmp_path / "test.svg"
+
+        result = _render_with_matplotlib(edges, root_names, output, "svg", None)
+        assert result is True
+        assert output.exists()
+
+    def test_render_with_matplotlib_empty_graph(self, tmp_path: Path, capsys) -> None:
+        """Test matplotlib rendering with empty graph."""
+        from rostree.cli import _check_matplotlib
+
+        if not _check_matplotlib():
+            return  # Skip if matplotlib not installed
+
+        edges: set[tuple[str, str]] = set()
+        root_names: set[str] = set()
+        output = tmp_path / "test.png"
+
+        result = _render_with_matplotlib(edges, root_names, output, "png", None)
+        assert result is False
+        captured = capsys.readouterr()
+        assert "empty" in captured.err.lower()
+
+    def test_render_with_matplotlib_isolated_nodes(self, tmp_path: Path) -> None:
+        """Test matplotlib rendering with isolated root nodes."""
+        from rostree.cli import _check_matplotlib
+
+        if not _check_matplotlib():
+            return  # Skip if matplotlib not installed
+
+        edges: set[tuple[str, str]] = set()  # No edges
+        root_names = {"isolated_pkg"}
+        output = tmp_path / "test.png"
+
+        result = _render_with_matplotlib(edges, root_names, output, "png", "Isolated")
+        assert result is True
+        assert output.exists()
+
+    def test_render_fallback_to_matplotlib(self, tmp_path: Path) -> None:
+        """Test that cmd_graph falls back to matplotlib when graphviz unavailable."""
+        from rostree.cli import cmd_graph
+
+        if not _check_matplotlib():
+            return  # Skip if matplotlib not installed
+
+        # Create a test package
+        pkg = tmp_path / "fallback_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>fallback_pkg</name>
+    <version>1.0.0</version>
+    <description>Fallback test</description>
+</package>
+"""
+        )
+
+        output_file = tmp_path / "fallback_test.png"
+        args = argparse.Namespace(
+            package="fallback_pkg",
+            workspace=None,
+            format="dot",
+            output=str(output_file),
+            depth=1,
+            runtime=False,
+            source=[str(tmp_path)],
+            no_title=False,
+            render="png",
+            open=False,
+        )
+
+        # Mock graphviz as unavailable, but matplotlib available
+        with mock.patch("rostree.cli._check_graphviz", return_value=False):
+            result = cmd_graph(args)
+            assert result == 0
+            assert output_file.exists()
