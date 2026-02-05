@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - Upcoming
+## [0.2.0] - 2026-02-05
 
 ### Added
 
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Welcome screen is now a full view instead of a modal overlay
 - Improved package source categorization display
 
-## [0.1.0] - 2025-01-30
+## [0.1.0] - 2026-02-05
 
 ### Added
 
