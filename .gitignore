@@ -20,6 +20,27 @@ wheels/
 .installed.cfg
 *.egg
 
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.webp
+*.svg
+*.eps
+*.pdf
+*.docx
+*.doc
+*.xls
+*.xlsx
+*.pptx
+*.ppt
+*.dot
+*.mermaid
+
 # Virtual environments
 .venv/
 venv/
