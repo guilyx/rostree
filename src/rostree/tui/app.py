@@ -27,15 +27,7 @@ WELCOME_BANNER = """
 [/bold cyan]
 """
 
-WELCOME_BODY = """
-[dim]Visualize ROS 2 package dependencies as a navigable tree.[/]
-
-  • [bold]CLI[/]:  rostree scan, rostree list, rostree tree <pkg>
-  • [bold]TUI[/]:  browse packages, expand/collapse, see details
-  • [bold]Library[/]: Python API for scripts and automation
-
-[dim]Requires ROS 2 env (source install/setup.bash).[/]
-"""
+WELCOME_BODY = """[dim]Explore ROS 2 package dependencies interactively.[/]"""
 
 # Limits to avoid huge trees and crashes
 MAX_PACKAGES_PER_SOURCE = 80  # max package names per source section
@@ -124,7 +116,7 @@ def _expand_to_depth(tn: TreeNode, depth: int, current: int = 0) -> None:
 
 
 class WelcomeScreen(ModalScreen[bool]):
-    """Welcome / presentation screen. Modal so Enter/q always work."""
+    """Welcome screen. Press Enter to browse packages, q to quit."""
 
     BINDINGS = [
         Binding("enter", "start", "Start", show=True),
@@ -134,19 +126,17 @@ class WelcomeScreen(ModalScreen[bool]):
     DEFAULT_CSS = """
     WelcomeScreen {
         align: center middle;
-        padding: 2 4;
     }
     WelcomeScreen #banner {
         text-align: center;
-        padding-bottom: 1;
     }
     WelcomeScreen #welcome_body {
-        padding: 1 2;
-        width: 60;
+        text-align: center;
+        padding: 1 0;
     }
     WelcomeScreen #welcome_footer {
         text-align: center;
-        padding-top: 2;
+        padding-top: 1;
     }
     """
 
@@ -154,13 +144,10 @@ class WelcomeScreen(ModalScreen[bool]):
         yield Static(WELCOME_BANNER, id="banner", markup=True)
         yield Static(WELCOME_BODY, id="welcome_body", markup=True)
         yield Static(
-            "[bold]This screen has focus.[/]  Press [cyan]Enter[/] to start  ·  [dim]q[/] to quit",
+            "[cyan]Enter[/] to start  ·  [dim]q[/] to quit",
             id="welcome_footer",
             markup=True,
         )
-
-    def on_mount(self) -> None:
-        self.sub_title = "Enter = start · q = quit"
 
     def action_start(self) -> None:
         self.dismiss(True)
@@ -320,6 +307,7 @@ class DepTreeApp(App[None]):
         Binding("f", "search", "Search", show=False),
         Binding("n", "next_match", "Next match", show=False),
         Binding("N", "prev_match", "Prev match", show=False),
+        Binding("d", "toggle_details", "Details"),
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "expand_all", "Expand all"),
@@ -335,6 +323,7 @@ class DepTreeApp(App[None]):
         self._search_query: str = ""
         self._search_matches: list[TreeNode] = []
         self._search_index: int = 0
+        self._details_visible: bool = True
 
     DEFAULT_CSS = """
     #nav_hint {
@@ -674,6 +663,15 @@ class DepTreeApp(App[None]):
             self.notify("No active search. Press / to search.", severity="information", timeout=2)
             return
         self._goto_match(self._search_index - 1)
+
+    def action_toggle_details(self) -> None:
+        """Toggle visibility of the details panel."""
+        self._details_visible = not self._details_visible
+        try:
+            details = self.query_one("#details", Static)
+            details.styles.display = "block" if self._details_visible else "none"
+        except Exception:
+            pass
 
     def action_quit(self) -> None:
         self.exit()
