@@ -8,34 +8,27 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from rostree.api import build_tree, list_known_packages_by_source
 
-# Welcome banner: ROSTREE
-WELCOME_BANNER = """
+# Welcome banner: ROSTREE (all lines must be same length for proper centering)
+WELCOME_BANNER = """\
 [bold cyan]
-██████╗  ██████╗ ███████╗████████╗██████╗ ███████╗███████╗
-██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔════╝
-██████╔╝██║   ██║███████╗   ██║   ██████╔╝█████╗  █████╗
-██╔══██╗██║   ██║╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══╝
-██║  ██║╚██████╔╝███████║   ██║   ██║  ██║███████╗███████╗
-╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
-[/bold cyan]
-"""
+██████╗   ██████╗  ███████╗ ████████╗ ██████╗  ███████╗ ███████╗
+██╔══██╗ ██╔═══██╗ ██╔════╝ ╚══██╔══╝ ██╔══██╗ ██╔════╝ ██╔════╝
+██████╔╝ ██║   ██║ ███████╗    ██║    ██████╔╝ █████╗   █████╗  
+██╔══██╗ ██║   ██║ ╚════██║    ██║    ██╔══██╗ ██╔══╝   ██╔══╝  
+██║  ██║ ╚██████╔╝ ███████║    ██║    ██║  ██║ ███████╗ ███████╗
+╚═╝  ╚═╝  ╚═════╝  ╚══════╝    ╚═╝    ╚═╝  ╚═╝ ╚══════╝ ╚══════╝
+[/bold cyan]"""
 
-WELCOME_BODY = """
-[dim]Visualize ROS 2 package dependencies as a navigable tree.[/]
-
-  • [bold]CLI[/]:  rostree scan, rostree list, rostree tree <pkg>
-  • [bold]TUI[/]:  browse packages, expand/collapse, see details
-  • [bold]Library[/]: Python API for scripts and automation
-
-[dim]Requires ROS 2 env (source install/setup.bash).[/]
-"""
+WELCOME_DESC = """[dim]Navigate and visualize ROS 2 package dependency trees.
+Discover packages from your workspace, system installs, and custom paths.
+Search, expand, and explore the full dependency graph interactively.[/]"""
 
 # Limits to avoid huge trees and crashes
 MAX_PACKAGES_PER_SOURCE = 80  # max package names per source section
@@ -121,52 +114,6 @@ def _expand_to_depth(tn: TreeNode, depth: int, current: int = 0) -> None:
             _expand_to_depth(child, depth, current + 1)
     except Exception:
         pass
-
-
-class WelcomeScreen(ModalScreen[bool]):
-    """Welcome / presentation screen. Modal so Enter/q always work."""
-
-    BINDINGS = [
-        Binding("enter", "start", "Start", show=True),
-        Binding("q", "quit", "Quit", show=True),
-    ]
-
-    DEFAULT_CSS = """
-    WelcomeScreen {
-        align: center middle;
-        padding: 2 4;
-    }
-    WelcomeScreen #banner {
-        text-align: center;
-        padding-bottom: 1;
-    }
-    WelcomeScreen #welcome_body {
-        padding: 1 2;
-        width: 60;
-    }
-    WelcomeScreen #welcome_footer {
-        text-align: center;
-        padding-top: 2;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        yield Static(WELCOME_BANNER, id="banner", markup=True)
-        yield Static(WELCOME_BODY, id="welcome_body", markup=True)
-        yield Static(
-            "[bold]This screen has focus.[/]  Press [cyan]Enter[/] to start  ·  [dim]q[/] to quit",
-            id="welcome_footer",
-            markup=True,
-        )
-
-    def on_mount(self) -> None:
-        self.sub_title = "Enter = start · q = quit"
-
-    def action_start(self) -> None:
-        self.dismiss(True)
-
-    def action_quit(self) -> None:
-        self.dismiss(False)
 
 
 class SearchScreen(ModalScreen[str | None]):
@@ -313,6 +260,7 @@ class DepTreeApp(App[None]):
 
     TITLE = "rostree"
     BINDINGS = [
+        Binding("enter", "start_main", "Start", show=False),
         Binding("escape", "back", "Back", show=True),
         Binding("b", "back", "Back", show=False),
         Binding("a", "add_source", "Add source"),
@@ -320,6 +268,7 @@ class DepTreeApp(App[None]):
         Binding("f", "search", "Search", show=False),
         Binding("n", "next_match", "Next match", show=False),
         Binding("N", "prev_match", "Prev match", show=False),
+        Binding("d", "toggle_details", "Details"),
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "expand_all", "Expand all"),
@@ -335,8 +284,32 @@ class DepTreeApp(App[None]):
         self._search_query: str = ""
         self._search_matches: list[TreeNode] = []
         self._search_index: int = 0
+        self._details_visible: bool = True
 
     DEFAULT_CSS = """
+    /* Welcome screen styles */
+    #welcome_container {
+        align: center middle;
+        width: 100%;
+        height: 100%;
+    }
+    #welcome_banner {
+        text-align: center;
+        content-align: center middle;
+        width: 100%;
+    }
+    #welcome_desc {
+        text-align: center;
+        padding: 2 4;
+    }
+    #welcome_hint {
+        text-align: center;
+        padding-top: 1;
+    }
+    /* Main view styles */
+    #main_container {
+        display: none;
+    }
     #nav_hint {
         display: none;
         height: auto;
@@ -354,27 +327,50 @@ class DepTreeApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static(
-            "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
-            id="nav_hint",
-        )
-        yield Tree("Dependencies", id="dep_tree")
-        yield Static(
-            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
-            id="details",
-        )
+        # Welcome view (initial)
+        with Container(id="welcome_container"):
+            yield Static(WELCOME_BANNER, id="welcome_banner", markup=True)
+            yield Static(WELCOME_DESC, id="welcome_desc", markup=True)
+            yield Static(
+                "[cyan]Enter[/] to explore  ·  [dim]q[/] to quit",
+                id="welcome_hint",
+                markup=True,
+            )
+        # Main view (hidden initially)
+        with Container(id="main_container"):
+            yield Static(
+                "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
+                id="nav_hint",
+            )
+            yield Tree("Dependencies", id="dep_tree")
+            yield Static(
+                "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
+                id="details",
+            )
         yield Footer()
 
     def on_mount(self) -> None:
-        self.sub_title = "Tab = move focus · Esc = Back · Keys shown in footer"
-        self.push_screen(WelcomeScreen(), self._on_welcome_done)
+        self.sub_title = "Dependency Tree Explorer"
 
-    def _on_welcome_done(self, start: bool) -> None:
-        if not start:
-            self.exit(0)
+    def on_key(self, event: Any) -> None:
+        """Handle key events - specifically Enter on welcome screen."""
+        if not self._main_started and event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            self.action_start_main()
+
+    def action_start_main(self) -> None:
+        """Transition from welcome screen to main view."""
+        if self._main_started:
             return
         self._main_started = True
-        self._start_main()
+        # Hide welcome, show main
+        try:
+            self.query_one("#welcome_container").styles.display = "none"
+            self.query_one("#main_container").styles.display = "block"
+        except Exception:
+            pass
+        self._load_main_view()
 
     def _source_color(self, label: str) -> str:
         if "System" in label:
@@ -387,7 +383,7 @@ class DepTreeApp(App[None]):
             return COLOR_ADDED
         return COLOR_SOURCE
 
-    def _start_main(self) -> None:
+    def _load_main_view(self) -> None:
         try:
             try:
                 self.query_one("#nav_hint").styles.display = "none"
@@ -543,7 +539,7 @@ class DepTreeApp(App[None]):
             pass
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
-        self._start_main()
+        self._load_main_view()
 
     def action_refresh(self) -> None:
         if not self._main_started:
@@ -553,7 +549,7 @@ class DepTreeApp(App[None]):
         else:
             tree = self.query_one("#dep_tree", Tree)
             self._clear_tree(tree)
-            self._start_main()
+            self._load_main_view()
 
     def action_expand_all(self) -> None:
         tree = self.query_one("#dep_tree", Tree)
@@ -674,6 +670,15 @@ class DepTreeApp(App[None]):
             self.notify("No active search. Press / to search.", severity="information", timeout=2)
             return
         self._goto_match(self._search_index - 1)
+
+    def action_toggle_details(self) -> None:
+        """Toggle visibility of the details panel."""
+        self._details_visible = not self._details_visible
+        try:
+            details = self.query_one("#details", Static)
+            details.styles.display = "block" if self._details_visible else "none"
+        except Exception:
+            pass
 
     def action_quit(self) -> None:
         self.exit()
