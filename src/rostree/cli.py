@@ -592,7 +592,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="rostree",
         description="Explore ROS 2 package dependencies from the command line.",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    from rostree import __version__
+
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

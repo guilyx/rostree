@@ -1,5 +1,7 @@
 """rostree: visualize ROS 2 package dependencies as a tree (library, TUI, CLI)."""
 
+from importlib.metadata import version, PackageNotFoundError
+
 from rostree.api import (
     build_tree,
     get_package_info,
@@ -16,5 +18,10 @@ __all__ = [
     "list_known_packages_by_source",
     "scan_workspaces",
     "WorkspaceInfo",
+    "__version__",
 ]
-__version__ = "0.1.0"
+
+try:
+    __version__ = version("rostree")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"  # Not installed as package
