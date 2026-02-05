@@ -15,13 +15,13 @@ from textual.widgets.tree import TreeNode
 
 from rostree.api import build_tree, list_known_packages_by_source
 
-# Welcome banner: ROSTREE (each letter is 8 chars wide + 1 space separator)
+# Welcome banner: ROSTREE (all lines must be same length for proper centering)
 WELCOME_BANNER = """\
 [bold cyan]
 ██████╗   ██████╗  ███████╗ ████████╗ ██████╗  ███████╗ ███████╗
 ██╔══██╗ ██╔═══██╗ ██╔════╝ ╚══██╔══╝ ██╔══██╗ ██╔════╝ ██╔════╝
-██████╔╝ ██║   ██║ ███████╗    ██║    ██████╔╝ █████╗   █████╗
-██╔══██╗ ██║   ██║ ╚════██║    ██║    ██╔══██╗ ██╔══╝   ██╔══╝
+██████╔╝ ██║   ██║ ███████╗    ██║    ██████╔╝ █████╗   █████╗  
+██╔══██╗ ██║   ██║ ╚════██║    ██║    ██╔══██╗ ██╔══╝   ██╔══╝  
 ██║  ██║ ╚██████╔╝ ███████║    ██║    ██║  ██║ ███████╗ ███████╗
 ╚═╝  ╚═╝  ╚═════╝  ╚══════╝    ╚═╝    ╚═╝  ╚═╝ ╚══════╝ ╚══════╝
 [/bold cyan]"""
