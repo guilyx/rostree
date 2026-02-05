@@ -1,4 +1,11 @@
-# rostree
+```
+██████╗  ██████╗ ███████╗████████╗██████╗ ███████╗███████╗
+██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔════╝
+██████╔╝██║   ██║███████╗   ██║   ██████╔╝█████╗  █████╗
+██╔══██╗██║   ██║╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══╝
+██║  ██║╚██████╔╝███████║   ██║   ██║  ██║███████╗███████╗
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
+```
 
 [![CI](https://github.com/guilyx/rostree/actions/workflows/ci.yml/badge.svg)](https://github.com/guilyx/rostree/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/guilyx/rostree/graph/badge.svg)](https://codecov.io/gh/guilyx/rostree)
