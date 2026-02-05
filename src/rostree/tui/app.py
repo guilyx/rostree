@@ -8,9 +8,9 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Static, Tree
+from textual.widgets import Footer, Header, Input, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from rostree.api import build_tree, list_known_packages_by_source
@@ -169,6 +169,69 @@ class WelcomeScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class SearchScreen(ModalScreen[str | None]):
+    """Modal to search for packages/nodes in the tree. Keyboard-only."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=True),
+    ]
+
+    DEFAULT_CSS = """
+    SearchScreen {
+        align: center middle;
+        padding: 2 4;
+    }
+    SearchScreen #search_title {
+        text-align: center;
+        padding-bottom: 1;
+    }
+    SearchScreen #search_input {
+        width: 60;
+        margin: 1 0;
+    }
+    SearchScreen #search_hint {
+        text-align: center;
+        padding-top: 1;
+    }
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._input: Input | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static(
+                "[bold cyan]Search[/]\n\n"
+                "Type a package name or partial match to find in the tree.",
+                id="search_title",
+                markup=True,
+            )
+            yield Input(
+                placeholder="package name...",
+                id="search_input",
+            )
+            yield Static(
+                "[dim]Enter[/] = Search  ·  [dim]Escape[/] = Cancel\n"
+                "[dim]After search: [bold]n[/bold] = next match, [bold]N[/bold] = previous[/]",
+                id="search_hint",
+                markup=True,
+            )
+
+    def on_mount(self) -> None:
+        self._input = self.query_one("#search_input", Input)
+        self._input.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "search_input":
+            return
+        value = self._input.value.strip() if self._input else ""
+        self.dismiss(value if value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class AddSourceScreen(ModalScreen[Path | None]):
     """Modal to enter a path to add as an extra source root. Keyboard-only: type path, Enter to add, Escape to cancel."""
 
@@ -253,6 +316,10 @@ class DepTreeApp(App[None]):
         Binding("escape", "back", "Back", show=True),
         Binding("b", "back", "Back", show=False),
         Binding("a", "add_source", "Add source"),
+        Binding("/", "search", "Search"),
+        Binding("f", "search", "Search", show=False),
+        Binding("n", "next_match", "Next match", show=False),
+        Binding("N", "prev_match", "Prev match", show=False),
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "expand_all", "Expand all"),
@@ -265,13 +332,17 @@ class DepTreeApp(App[None]):
         self._root_node: Any = None
         self._main_started = False
         self._extra_source_roots: list[Path] = []
+        self._search_query: str = ""
+        self._search_matches: list[TreeNode] = []
+        self._search_index: int = 0
 
     DEFAULT_CSS = """
-    #back_bar {
+    #nav_hint {
         display: none;
         height: auto;
         padding: 0 1;
         margin-bottom: 1;
+        color: $text-muted;
     }
     #details {
         padding: 1 2;
@@ -283,11 +354,13 @@ class DepTreeApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal(id="back_bar"):
-            yield Button("← Back to package list", id="back_btn", variant="primary")
+        yield Static(
+            "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
+            id="nav_hint",
+        )
         yield Tree("Dependencies", id="dep_tree")
         yield Static(
-            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Tab[/] = switch focus  ·  [dim]Esc[/]/[dim]b[/] = Back",
+            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
             id="details",
         )
         yield Footer()
@@ -317,7 +390,7 @@ class DepTreeApp(App[None]):
     def _start_main(self) -> None:
         try:
             try:
-                self.query_one("#back_bar").styles.display = "none"
+                self.query_one("#nav_hint").styles.display = "none"
             except Exception:
                 pass
             tree = self.query_one("#dep_tree", Tree)
@@ -413,12 +486,9 @@ class DepTreeApp(App[None]):
             _expand_to_depth(tree.root, EXPAND_DEPTH_DEFAULT)
         except Exception:
             pass
-        self._set_details(
-            self._format_node(self._root_node)
-            + "\n\n[dim]Esc[/] or [dim]b[/] = Back to package list  ·  [dim]Tab[/] then [dim]Enter[/] = Back button"
-        )
+        self._set_details(self._format_node(self._root_node))
         try:
-            self.query_one("#back_bar").styles.display = "block"
+            self.query_one("#nav_hint").styles.display = "block"
             self.query_one("#dep_tree", Tree).focus()
         except Exception:
             pass
@@ -468,16 +538,12 @@ class DepTreeApp(App[None]):
         self._root_package = None
         self._root_node = None
         try:
-            self.query_one("#back_bar").styles.display = "none"
+            self.query_one("#nav_hint").styles.display = "none"
         except Exception:
             pass
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
         self._start_main()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "back_btn":
-            self.action_back()
 
     def action_refresh(self) -> None:
         if not self._main_started:
@@ -523,6 +589,91 @@ class DepTreeApp(App[None]):
             self.query_one("#dep_tree", Tree).focus()
         except Exception:
             pass
+
+    def action_search(self) -> None:
+        """Open search modal."""
+        if not self._main_started:
+            return
+        self.push_screen(SearchScreen(), self._on_search_done)
+
+    def _on_search_done(self, query: str | None) -> None:
+        if not query:
+            return
+        self._search_query = query.lower()
+        self._search_matches = []
+        self._search_index = 0
+
+        tree = self.query_one("#dep_tree", Tree)
+        self._collect_matches(tree.root, query.lower())
+
+        if not self._search_matches:
+            self.notify(f"No matches for '{query}'", severity="warning", timeout=2)
+            return
+
+        self.notify(
+            f"Found {len(self._search_matches)} match(es) for '{query}'",
+            severity="information",
+            timeout=2,
+        )
+        self._goto_match(0)
+
+    def _collect_matches(self, node: TreeNode, query: str) -> None:
+        """Recursively collect nodes matching the search query."""
+        label = str(node.label).lower()
+        # Also check the data if it's a string (package name)
+        data_str = str(node.data).lower() if node.data else ""
+        if query in label or query in data_str:
+            self._search_matches.append(node)
+        for child in node.children:
+            self._collect_matches(child, query)
+
+    def _goto_match(self, index: int) -> None:
+        """Navigate to and select a specific match."""
+        if not self._search_matches:
+            return
+        self._search_index = index % len(self._search_matches)
+        match_node = self._search_matches[self._search_index]
+
+        # Expand all ancestors so the node is visible
+        self._expand_ancestors(match_node)
+
+        # Select the node
+        tree = self.query_one("#dep_tree", Tree)
+        tree.select_node(match_node)
+        tree.scroll_to_node(match_node)
+
+        # Show match info
+        total = len(self._search_matches)
+        current = self._search_index + 1
+        self.notify(
+            f"Match {current}/{total}: {match_node.label}",
+            severity="information",
+            timeout=2,
+        )
+
+    def _expand_ancestors(self, node: TreeNode) -> None:
+        """Expand all ancestor nodes to make the target visible."""
+        ancestors = []
+        parent = node.parent
+        while parent is not None:
+            ancestors.append(parent)
+            parent = parent.parent
+        for ancestor in reversed(ancestors):
+            ancestor.expand()
+
+    def action_next_match(self) -> None:
+        """Go to next search match."""
+        if not self._search_matches:
+            self.notify("No active search. Press / to search.", severity="information", timeout=2)
+            return
+        self._goto_match(self._search_index + 1)
+
+    def action_prev_match(self) -> None:
+        """Go to previous search match."""
+        if not self._search_matches:
+            self.notify("No active search. Press / to search.", severity="information", timeout=2)
+            return
+        self._goto_match(self._search_index - 1)
 
     def action_quit(self) -> None:
         self.exit()
