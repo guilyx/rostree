@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-30
+
+### Fixed
+
+- **Dynamic versioning**: `rostree --version` now correctly reads version from package metadata instead of hardcoded value
+- **TUI banner alignment**: Fixed ASCII art banner with inconsistent character alignment causing visual shifting
+
+### Changed
+
+- Version is now sourced from `importlib.metadata` for single source of truth (pyproject.toml)
+
 ## [0.2.0] - 2026-02-05
 
 ### Added
@@ -72,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.10+
 - textual >= 0.47.0
 
-[Unreleased]: https://github.com/guilyx/rostree/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/guilyx/rostree/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/guilyx/rostree/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/guilyx/rostree/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/guilyx/rostree/releases/tag/v0.1.0
