@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`rostree graph` command**: Generate dependency graphs in DOT (Graphviz) or Mermaid format
-  - **Direct image rendering**: `--render png|svg|pdf` creates image files (requires Graphviz)
+  - **Direct image rendering**: `--render png|svg|pdf` creates image files
+  - **Two rendering backends**: Graphviz (system) or matplotlib (pip: `rostree[viz]`)
   - **Auto-open**: `--open` opens the rendered image in default viewer
   - Single package: `rostree graph rclpy --render png`
   - Entire workspace: `rostree graph --render png` or `rostree graph -w /path/to/ws --render svg`

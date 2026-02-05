@@ -278,6 +278,113 @@ def _check_graphviz() -> bool:
     return shutil.which("dot") is not None
 
 
+def _check_matplotlib() -> bool:
+    """Check if matplotlib and networkx are available."""
+    try:
+        import matplotlib  # noqa: F401
+        import networkx  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _render_with_matplotlib(
+    edges: set[tuple[str, str]],
+    root_names: set[str],
+    output_path: Path,
+    format: str,
+    title: str | None = None,
+) -> bool:
+    """Render graph using matplotlib and networkx (pure Python, no system deps)."""
+    try:
+        import matplotlib.pyplot as plt
+        import networkx as nx
+    except ImportError:
+        print(
+            "Error: matplotlib/networkx not installed. Install with:\n"
+            "  pip install rostree[viz]\n"
+            "  # or: pip install matplotlib networkx",
+            file=sys.stderr,
+        )
+        return False
+
+    try:
+        # Create directed graph
+        G = nx.DiGraph()
+        G.add_edges_from(edges)
+
+        # Add isolated root nodes (roots with no deps)
+        for root in root_names:
+            if root not in G:
+                G.add_node(root)
+
+        if len(G.nodes()) == 0:
+            print("Error: Graph is empty", file=sys.stderr)
+            return False
+
+        # Create figure
+        fig_width = max(12, len(G.nodes()) * 0.5)
+        fig_height = max(8, len(G.nodes()) * 0.3)
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+        # Layout - hierarchical for dependency graphs
+        try:
+            # Try graphviz layout if available (best for DAGs)
+            pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args="-Grankdir=LR")
+        except Exception:
+            try:
+                # Fall back to spring layout with more iterations
+                pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+            except Exception:
+                # Last resort: shell layout
+                pos = nx.shell_layout(G)
+
+        # Node colors: root nodes are highlighted
+        node_colors = ["lightblue" if n in root_names else "lightgray" for n in G.nodes()]
+
+        # Draw the graph
+        nx.draw_networkx_nodes(
+            G,
+            pos,
+            node_color=node_colors,
+            node_size=2000,
+            alpha=0.9,
+            ax=ax,
+        )
+        nx.draw_networkx_labels(
+            G,
+            pos,
+            font_size=8,
+            font_weight="bold",
+            ax=ax,
+        )
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            edge_color="gray",
+            arrows=True,
+            arrowsize=15,
+            alpha=0.7,
+            ax=ax,
+        )
+
+        if title:
+            ax.set_title(title, fontsize=14, fontweight="bold")
+
+        ax.axis("off")
+        plt.tight_layout()
+
+        # Save to file
+        plt.savefig(output_path, format=format, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        return True
+
+    except Exception as e:
+        print(f"Error rendering with matplotlib: {e}", file=sys.stderr)
+        return False
+
+
 def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
     """Render DOT content to an image file using Graphviz."""
     if not _check_graphviz():
@@ -431,7 +538,34 @@ def cmd_graph(args: argparse.Namespace) -> int:
             out_path = Path(f"{base_name}.{render_format}")
 
         print(f"Rendering graph to {out_path}...", file=sys.stderr)
-        if not _render_dot(output, out_path, render_format):
+
+        # Try Graphviz first (best quality), fall back to matplotlib
+        rendered = False
+        if _check_graphviz():
+            rendered = _render_dot(output, out_path, render_format)
+        else:
+            # Collect edges for matplotlib rendering
+            root_names = {t.name for t in trees}
+            edges: set[tuple[str, str]] = set()
+            for tree in trees:
+                _collect_edges(tree, edges)
+
+            if _check_matplotlib():
+                print("Graphviz not found, using matplotlib...", file=sys.stderr)
+                rendered = _render_with_matplotlib(
+                    edges, root_names, out_path, render_format, title
+                )
+            else:
+                print(
+                    "Error: No rendering backend available.\n"
+                    "Install one of:\n"
+                    "  1. Graphviz (system): sudo apt install graphviz\n"
+                    "  2. matplotlib (pip): pip install rostree[viz]",
+                    file=sys.stderr,
+                )
+                return 1
+
+        if not rendered:
             return 1
 
         print(f"Graph image saved to: {out_path}", file=sys.stderr)

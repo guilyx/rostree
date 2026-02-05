@@ -76,17 +76,24 @@ rostree graph rclpy -r                 # Runtime-only dependencies
 rostree graph rclpy --no-title         # No title in graph
 ```
 
-**Install Graphviz for `--render`:**
+**Install a rendering backend for `--render`:**
 
+Option 1: **Graphviz** (best quality, system package)
 ```bash
 # Ubuntu/Debian
 sudo apt install graphviz
 
 # macOS
 brew install graphviz
-
-# Or download from https://graphviz.org/download/
 ```
+
+Option 2: **matplotlib** (pure pip, no system deps)
+```bash
+pip install rostree[viz]
+# or: pip install matplotlib networkx
+```
+
+If both are available, Graphviz is preferred for better layout quality.
 
 **Manual rendering (alternative):**
 
