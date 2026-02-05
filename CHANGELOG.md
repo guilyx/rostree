@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-02-05
+## [0.2.1] - 2026-01-30
+
+### Added
+
+- **TUI background loading**: Package scanning now starts immediately when app opens (before pressing Enter)
+- **Loading indicator**: Shows spinner and status while scanning for packages
+- **Ready status**: Welcome screen shows package count when scanning completes
 
 ### Fixed
 
@@ -17,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Version is now sourced from `importlib.metadata` for single source of truth (pyproject.toml)
+- TUI uses cached packages from background scan for faster navigation
 
 ## [0.2.0] - 2026-02-05
 

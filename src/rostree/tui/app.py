@@ -10,8 +10,9 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static, Tree
+from textual.widgets import Footer, Header, Input, LoadingIndicator, Static, Tree
 from textual.widgets.tree import TreeNode
+from textual.worker import Worker, WorkerState
 
 from rostree.api import build_tree, list_known_packages_by_source
 
@@ -285,6 +286,10 @@ class DepTreeApp(App[None]):
         self._search_matches: list[TreeNode] = []
         self._search_index: int = 0
         self._details_visible: bool = True
+        # Background loading state
+        self._packages_cache: dict[str, list[str]] | None = None
+        self._packages_loading: bool = False
+        self._packages_error: str | None = None
 
     DEFAULT_CSS = """
     /* Welcome screen styles */
@@ -305,6 +310,17 @@ class DepTreeApp(App[None]):
     #welcome_hint {
         text-align: center;
         padding-top: 1;
+    }
+    #welcome_loading {
+        text-align: center;
+        padding-top: 1;
+        display: none;
+    }
+    #welcome_loading.loading {
+        display: block;
+    }
+    #welcome_loading LoadingIndicator {
+        background: transparent;
     }
     /* Main view styles */
     #main_container {
@@ -336,6 +352,10 @@ class DepTreeApp(App[None]):
                 id="welcome_hint",
                 markup=True,
             )
+            # Loading indicator (shown while scanning)
+            with Container(id="welcome_loading"):
+                yield LoadingIndicator()
+                yield Static("[dim]Scanning for packages...[/]", id="loading_text", markup=True)
         # Main view (hidden initially)
         with Container(id="main_container"):
             yield Static(
@@ -351,6 +371,8 @@ class DepTreeApp(App[None]):
 
     def on_mount(self) -> None:
         self.sub_title = "Dependency Tree Explorer"
+        # Start loading packages in the background immediately
+        self._start_package_scan()
 
     def on_key(self, event: Any) -> None:
         """Handle key events - specifically Enter on welcome screen."""
@@ -358,6 +380,69 @@ class DepTreeApp(App[None]):
             event.prevent_default()
             event.stop()
             self.action_start_main()
+
+    def _start_package_scan(self) -> None:
+        """Start scanning for packages in the background."""
+        if self._packages_cache is not None or self._packages_loading:
+            return  # Already loaded or loading
+        self._packages_loading = True
+        # Show loading indicator
+        try:
+            loading_container = self.query_one("#welcome_loading")
+            loading_container.add_class("loading")
+        except Exception:
+            pass
+        # Start background worker
+        self.run_worker(self._scan_packages_worker, thread=True)
+
+    def _scan_packages_worker(self) -> dict[str, list[str]]:
+        """Worker that scans for packages in a background thread."""
+        return list_known_packages_by_source(
+            extra_source_roots=self._extra_source_roots or None,
+        )
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker completion."""
+        if event.state == WorkerState.SUCCESS:
+            self._packages_cache = event.worker.result
+            self._packages_loading = False
+            self._packages_error = None
+            # Update loading indicator
+            self._update_loading_status()
+        elif event.state == WorkerState.ERROR:
+            self._packages_loading = False
+            self._packages_error = str(event.worker.error)
+            self._update_loading_status()
+
+    def _update_loading_status(self) -> None:
+        """Update loading indicator status."""
+        try:
+            loading_container = self.query_one("#welcome_loading")
+            loading_text = self.query_one("#loading_text", Static)
+            if self._packages_cache is not None:
+                total = sum(len(v) for v in self._packages_cache.values())
+                loading_container.remove_class("loading")
+                # Update hint to show ready status
+                hint = self.query_one("#welcome_hint", Static)
+                hint.update(
+                    f"[green]✓[/] {total} packages found  ·  [cyan]Enter[/] to explore  ·  [dim]q[/] to quit"
+                )
+            elif self._packages_error:
+                loading_text.update(f"[red]Error: {self._packages_error}[/]")
+        except Exception:
+            pass
+
+    def _check_loading_complete(self) -> None:
+        """Check if background loading is complete and update main view."""
+        if self._packages_loading:
+            # Still loading, check again later
+            self.set_timer(0.3, self._check_loading_complete)
+            return
+        # Loading complete, refresh main view
+        if self._main_started:
+            tree = self.query_one("#dep_tree", Tree)
+            self._clear_tree(tree)
+            self._load_main_view()
 
     def action_start_main(self) -> None:
         """Transition from welcome screen to main view."""
@@ -393,9 +478,26 @@ class DepTreeApp(App[None]):
             if self._root_package:
                 self._load_tree(self._root_package)
             else:
-                by_source = list_known_packages_by_source(
-                    extra_source_roots=self._extra_source_roots or None,
-                )
+                # Use cached packages if available, otherwise load (fallback)
+                if self._packages_loading:
+                    # Still loading - show loading message and wait
+                    tree.root.label = f"[{COLOR_HEADER}]Loading packages...[/]"
+                    tree.root.add_leaf("[dim]Scanning for packages, please wait...[/]")
+                    self._set_details("[dim]Scanning for ROS 2 packages in background...[/]")
+                    try:
+                        tree.focus()
+                    except Exception:
+                        pass
+                    # Set a timer to check again
+                    self.set_timer(0.5, self._check_loading_complete)
+                    return
+                by_source = self._packages_cache
+                if by_source is None:
+                    # Cache not available, load synchronously (fallback)
+                    by_source = list_known_packages_by_source(
+                        extra_source_roots=self._extra_source_roots or None,
+                    )
+                    self._packages_cache = by_source
                 if not by_source:
                     self._set_details(
                         "No ROS 2 packages found. Set AMENT_PREFIX_PATH or run from a workspace.\n\n"
@@ -547,8 +649,13 @@ class DepTreeApp(App[None]):
         if self._root_package:
             self._load_tree(self._root_package)
         else:
+            # Clear cache to force rescan
+            self._packages_cache = None
+            self._packages_loading = False
             tree = self.query_one("#dep_tree", Tree)
             self._clear_tree(tree)
+            # Start background scan and show loading
+            self._start_package_scan()
             self._load_main_view()
 
     def action_expand_all(self) -> None:
