@@ -36,9 +36,10 @@ rostree list --by-source     # List packages grouped by source
 rostree tree rclpy           # Show dependency tree for a package
 rostree tree rclpy --depth 3 # Limit tree depth
 rostree tree rclpy --json    # Output as JSON
-rostree graph rclpy          # Generate DOT graph for Graphviz
-rostree graph -w ~/ros2_ws   # Graph entire workspace
-rostree graph rclpy -f mermaid -o deps.md  # Mermaid format
+rostree graph rclpy --render png       # Generate PNG image (requires graphviz)
+rostree graph rclpy --render svg --open # Create SVG and open it
+rostree graph -w ~/ros2_ws --render png # Graph entire workspace to image
+rostree graph rclpy -f mermaid         # Mermaid format (text)
 ```
 
 ### TUI mode

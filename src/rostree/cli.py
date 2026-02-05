@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -271,6 +273,61 @@ GRAPH_DEFAULT_DEPTH = 4
 GRAPH_MAX_PACKAGES = 50
 
 
+def _check_graphviz() -> bool:
+    """Check if Graphviz (dot) is available."""
+    return shutil.which("dot") is not None
+
+
+def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
+    """Render DOT content to an image file using Graphviz."""
+    if not _check_graphviz():
+        print(
+            "Error: Graphviz not found. Install it with:\n"
+            "  Ubuntu/Debian: sudo apt install graphviz\n"
+            "  macOS: brew install graphviz\n"
+            "  Or download from: https://graphviz.org/download/",
+            file=sys.stderr,
+        )
+        return False
+
+    try:
+        result = subprocess.run(
+            ["dot", f"-T{format}", "-o", str(output_path)],
+            input=dot_content,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            print(f"Graphviz error: {result.stderr}", file=sys.stderr)
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        print("Error: Graphviz timed out (graph may be too large)", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Error running Graphviz: {e}", file=sys.stderr)
+        return False
+
+
+def _open_file(path: Path) -> bool:
+    """Open a file with the system default application."""
+    import platform
+
+    system = platform.system()
+    try:
+        if system == "Darwin":  # macOS
+            subprocess.run(["open", str(path)], check=True)
+        elif system == "Windows":
+            subprocess.run(["start", "", str(path)], shell=True, check=True)
+        else:  # Linux and others
+            subprocess.run(["xdg-open", str(path)], check=True)
+        return True
+    except Exception as e:
+        print(f"Could not open file: {e}", file=sys.stderr)
+        return False
+
+
 def cmd_graph(args: argparse.Namespace) -> int:
     """Generate a dependency graph in DOT or Mermaid format."""
     extra_roots = [Path(p) for p in args.source] if args.source else None
@@ -346,6 +403,46 @@ def cmd_graph(args: argparse.Namespace) -> int:
     else:  # dot
         output = _generate_dot(trees, title=title)
 
+    # Handle rendering to image
+    render_format = getattr(args, "render", None)
+    if render_format:
+        if args.format == "mermaid":
+            print(
+                "Error: --render only works with DOT format (not mermaid). "
+                "Remove -f mermaid or use mermaid.live for rendering.",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Determine output path
+        if args.output:
+            # If output specified, use it with proper extension
+            out_path = Path(args.output)
+            if out_path.suffix.lower() not in (f".{render_format}", ".dot"):
+                out_path = out_path.with_suffix(f".{render_format}")
+        else:
+            # Default filename based on package or workspace
+            if args.package:
+                base_name = args.package.replace("/", "_")
+            elif args.workspace:
+                base_name = Path(args.workspace).name
+            else:
+                base_name = "workspace_deps"
+            out_path = Path(f"{base_name}.{render_format}")
+
+        print(f"Rendering graph to {out_path}...", file=sys.stderr)
+        if not _render_dot(output, out_path, render_format):
+            return 1
+
+        print(f"Graph image saved to: {out_path}", file=sys.stderr)
+
+        # Open the file if requested
+        if getattr(args, "open", False):
+            _open_file(out_path)
+
+        return 0
+
+    # Just output text (DOT or Mermaid)
     if args.output:
         Path(args.output).write_text(output)
         print(f"Graph written to: {args.output}", file=sys.stderr)
@@ -532,6 +629,17 @@ def main(argv: list[str] | None = None) -> int:
         "--no-title",
         action="store_true",
         help="Don't include a title in the graph",
+    )
+    graph_parser.add_argument(
+        "--render",
+        choices=["png", "svg", "pdf"],
+        metavar="FORMAT",
+        help="Render to image (png, svg, pdf). Requires Graphviz installed.",
+    )
+    graph_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the rendered image after creation (use with --render)",
     )
     graph_parser.set_defaults(func=cmd_graph)
 

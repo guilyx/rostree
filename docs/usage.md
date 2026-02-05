@@ -49,37 +49,51 @@ rostree tree rclpy -s /src   # Add extra source directories
 
 ### `rostree graph`
 
-Generate dependency graphs in DOT (Graphviz) or Mermaid format.
+Generate dependency graphs in DOT (Graphviz) or Mermaid format. Can render directly to PNG/SVG/PDF.
 
 ```bash
-# Single package
+# Single package - render to image (requires Graphviz)
+rostree graph rclpy --render png           # Creates rclpy.png
+rostree graph rclpy --render svg --open    # Create SVG and open it
+rostree graph rclpy --render pdf -o out.pdf
+
+# Single package - text output
 rostree graph rclpy                    # DOT format to stdout
 rostree graph rclpy -f mermaid         # Mermaid format
-rostree graph rclpy -o deps.dot        # Write to file
+rostree graph rclpy -o deps.dot        # Write DOT to file
 rostree graph rclpy -d 3               # Limit depth
 
 # Entire workspace (current environment)
-rostree graph                          # Graph all non-system packages
-rostree graph -d 2                     # Limit depth for performance
+rostree graph --render png             # Graph all non-system packages
+rostree graph -d 2 --render svg        # Limit depth for performance
 
 # Specific workspace
-rostree graph -w ~/ros2_ws             # Scan and graph workspace
-rostree graph -w ~/ros2_ws -f mermaid  # Mermaid format
+rostree graph -w ~/ros2_ws --render png    # Scan and graph workspace
+rostree graph -w ~/ros2_ws -f mermaid      # Mermaid format (text only)
 
 # Options
 rostree graph rclpy -r                 # Runtime-only dependencies
 rostree graph rclpy --no-title         # No title in graph
 ```
 
-**Rendering graphs:**
+**Install Graphviz for `--render`:**
 
 ```bash
-# DOT → PNG (requires graphviz)
+# Ubuntu/Debian
+sudo apt install graphviz
+
+# macOS
+brew install graphviz
+
+# Or download from https://graphviz.org/download/
+```
+
+**Manual rendering (alternative):**
+
+```bash
+# DOT → PNG
 rostree graph rclpy -o deps.dot
 dot -Tpng deps.dot -o deps.png
-
-# DOT → SVG
-dot -Tsvg deps.dot -o deps.svg
 
 # Mermaid → view online
 rostree graph rclpy -f mermaid | pbcopy  # Copy to clipboard

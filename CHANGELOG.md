@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`rostree graph` command**: Generate dependency graphs in DOT (Graphviz) or Mermaid format
-  - Single package: `rostree graph rclpy`
-  - Entire workspace: `rostree graph` (no args) or `rostree graph -w /path/to/ws`
+  - **Direct image rendering**: `--render png|svg|pdf` creates image files (requires Graphviz)
+  - **Auto-open**: `--open` opens the rendered image in default viewer
+  - Single package: `rostree graph rclpy --render png`
+  - Entire workspace: `rostree graph --render png` or `rostree graph -w /path/to/ws --render svg`
   - Output to file with `-o/--output` or stdout
   - Support for depth limiting with `-d/--depth`
   - Runtime-only dependencies with `-r/--runtime`

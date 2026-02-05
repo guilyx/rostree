@@ -19,6 +19,8 @@ from rostree.cli import (
     _generate_mermaid,
     _collect_edges,
     _mermaid_id,
+    _check_graphviz,
+    _render_dot,
 )
 from rostree.core.tree import DependencyNode
 
@@ -1126,3 +1128,115 @@ class TestCmdGraph:
             )
             result = cmd_graph(args)
             assert result == 0
+
+    def test_render_mermaid_error(self, tmp_path: Path, capsys) -> None:
+        """Test error when trying to render mermaid format."""
+        pkg = tmp_path / "render_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>render_pkg</name>
+    <version>1.0.0</version>
+    <description>Render test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="render_pkg",
+                workspace=None,
+                format="mermaid",
+                output=None,
+                depth=1,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+                render="png",
+                open=False,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 1
+            assert "mermaid" in captured.err.lower()
+
+    def test_render_with_graphviz(self, tmp_path: Path, capsys) -> None:
+        """Test rendering to PNG when graphviz is available."""
+        pkg = tmp_path / "graphviz_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>graphviz_pkg</name>
+    <version>1.0.0</version>
+    <description>Graphviz test</description>
+</package>
+"""
+        )
+        # Only run if graphviz is installed
+        if not _check_graphviz():
+            return
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            output_file = tmp_path / "test.png"
+            args = argparse.Namespace(
+                package="graphviz_pkg",
+                workspace=None,
+                format="dot",
+                output=str(output_file),
+                depth=1,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+                render="png",
+                open=False,
+            )
+            result = cmd_graph(args)
+            assert result == 0
+            assert output_file.exists()
+
+
+class TestGraphvizHelpers:
+    """Tests for Graphviz helper functions."""
+
+    def test_check_graphviz(self) -> None:
+        """Test graphviz check returns bool."""
+        result = _check_graphviz()
+        assert isinstance(result, bool)
+
+    def test_render_dot_no_graphviz(self, tmp_path: Path, capsys) -> None:
+        """Test render_dot error when graphviz not available."""
+        with mock.patch("rostree.cli.shutil.which", return_value=None):
+            result = _render_dot("digraph {}", tmp_path / "out.png", "png")
+            assert result is False
+            captured = capsys.readouterr()
+            assert "Graphviz not found" in captured.err
+
+    def test_render_dot_with_graphviz(self, tmp_path: Path) -> None:
+        """Test render_dot succeeds when graphviz is available."""
+        if not _check_graphviz():
+            return  # Skip if graphviz not installed
+
+        dot_content = 'digraph { "A" -> "B"; }'
+        output = tmp_path / "test.png"
+        result = _render_dot(dot_content, output, "png")
+        assert result is True
+        assert output.exists()
