@@ -1,5 +1,12 @@
 # rostree
 
+[![CI](https://github.com/guilyx/rostree/actions/workflows/ci.yml/badge.svg)](https://github.com/guilyx/rostree/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/guilyx/rostree/graph/badge.svg)](https://codecov.io/gh/guilyx/rostree)
+[![PyPI version](https://img.shields.io/pypi/v/rostree.svg)](https://pypi.org/project/rostree/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/rostree.svg)](https://pypi.org/project/rostree/)
+[![Python versions](https://img.shields.io/pypi/pyversions/rostree.svg)](https://pypi.org/project/rostree/)
+[![License](https://img.shields.io/github/license/guilyx/rostree.svg)](https://github.com/guilyx/rostree/blob/main/LICENSE)
+
 Explore ROS 2 package dependencies from the command line (CLI, TUI, library).
 
 **Docs:** [docs/README.md](docs/README.md) — overview, package discovery, dependency trees, usage, development.
