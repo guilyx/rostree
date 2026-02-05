@@ -43,12 +43,22 @@ def _is_ros_package_dependency(name: str) -> bool:
     return True
 
 
-def parse_package_xml(path: Path) -> PackageInfo | None:
+def parse_package_xml(
+    path: Path,
+    *,
+    include_tags: tuple[str, ...] | None = None,
+) -> PackageInfo | None:
     """
     Parse a package.xml file and return package name, version, description, and dependencies.
 
     Only dependency tags that typically refer to ROS packages are collected;
     buildtool_depend and system-style deps may be excluded by heuristic.
+
+    Args:
+        path: Path to package.xml.
+        include_tags: If set, only collect deps from these tags (e.g. ("depend", "exec_depend")
+            for runtime-only). If None, use all DEPENDENCY_TAGS.
+
     Returns None if the file cannot be read or is not valid package.xml.
     """
     if not path.exists() or not path.is_file():
@@ -73,8 +83,11 @@ def parse_package_xml(path: Path) -> PackageInfo | None:
         elif child.tag == "description" and child.text:
             description = child.text.strip()
 
+    tags = include_tags if include_tags is not None else DEPENDENCY_TAGS
     deps: list[str] = []
-    for tag in DEPENDENCY_TAGS:
+    for tag in tags:
+        if tag not in DEPENDENCY_TAGS:
+            continue
         for elem in root.findall(f".//{tag}"):
             if elem.text:
                 dep = elem.text.strip()

@@ -1,7 +1,7 @@
-# Publish rosdep-viz to PyPI.
+# Publish rostree to PyPI.
 # Setup: In PyPI (pypi.org) → Your project → Publishing → Add a new trusted publisher:
 #   - Build system: GitHub Actions
-#   - Owner/repo: <your-org>/rosdep_viz
+#   - Owner/repo: <your-org>/rostree
 #   - Workflow: publish.yml
 #   - Environment: (leave empty or use "pypi")
 # Then remove the "environment: pypi" key below if you did not create that env.
