@@ -352,6 +352,13 @@ class DepTreeApp(App[None]):
     def on_mount(self) -> None:
         self.sub_title = "Dependency Tree Explorer"
 
+    def on_key(self, event: Any) -> None:
+        """Handle key events - specifically Enter on welcome screen."""
+        if not self._main_started and event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            self.action_start_main()
+
     def action_start_main(self) -> None:
         """Transition from welcome screen to main view."""
         if self._main_started:
