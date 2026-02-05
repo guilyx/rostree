@@ -25,73 +25,9 @@ WELCOME_BANNER = """[bold cyan]
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
 [/bold cyan]"""
 
-WELCOME_DESC = "[dim]Explore ROS 2 package dependencies interactively.[/]"
-
-# Animated tree frames for welcome screen (dependency tree expanding)
-TREE_FRAMES = [
-    # Frame 0: seed
-    """[cyan]
-        ●
-[/cyan]""",
-    # Frame 1: sprouting
-    """[cyan]
-        ●
-        │
-[/cyan]""",
-    # Frame 2: first branch
-    """[cyan]
-        ●
-        ├──●
-        │
-[/cyan]""",
-    # Frame 3: growing
-    """[cyan]
-        ●
-        ├──●
-        │  └──●
-        │
-[/cyan]""",
-    # Frame 4: second branch
-    """[cyan]
-        ●
-        ├──●
-        │  └──●
-        └──●
-[/cyan]""",
-    # Frame 5: more leaves
-    """[cyan]
-        ●
-        ├──●
-        │  ├──●
-        │  └──●
-        └──●
-           └──●
-[/cyan]""",
-    # Frame 6: full tree
-    """[cyan]
-        ●
-        ├──●
-        │  ├──●
-        │  │  └──●
-        │  └──●
-        └──●
-           └──●
-              └──●
-[/cyan]""",
-    # Frame 7: even fuller
-    """[cyan]
-        ●
-        ├──●
-        │  ├──●
-        │  │  └──●
-        │  └──●
-        │     └──●
-        └──●
-           ├──●
-           └──●
-              └──●
-[/cyan]""",
-]
+WELCOME_DESC = """[dim]Navigate and visualize ROS 2 package dependency trees.
+Discover packages from your workspace, system installs, and custom paths.
+Search, expand, and explore the full dependency graph interactively.[/]"""
 
 # Limits to avoid huge trees and crashes
 MAX_PACKAGES_PER_SOURCE = 80  # max package names per source section
@@ -348,8 +284,6 @@ class DepTreeApp(App[None]):
         self._search_matches: list[TreeNode] = []
         self._search_index: int = 0
         self._details_visible: bool = True
-        self._anim_frame: int = 0
-        self._anim_timer: Any = None
 
     DEFAULT_CSS = """
     /* Welcome screen styles */
@@ -360,16 +294,12 @@ class DepTreeApp(App[None]):
     }
     #welcome_banner {
         text-align: center;
-        width: auto;
-    }
-    #welcome_tree_anim {
-        text-align: center;
-        width: auto;
-        height: 12;
+        content-align: center middle;
+        width: 100%;
     }
     #welcome_desc {
         text-align: center;
-        padding: 1 0;
+        padding: 2 4;
     }
     #welcome_hint {
         text-align: center;
@@ -399,7 +329,6 @@ class DepTreeApp(App[None]):
         # Welcome view (initial)
         with Container(id="welcome_container"):
             yield Static(WELCOME_BANNER, id="welcome_banner", markup=True)
-            yield Static(TREE_FRAMES[0], id="welcome_tree_anim", markup=True)
             yield Static(WELCOME_DESC, id="welcome_desc", markup=True)
             yield Static(
                 "[cyan]Enter[/] to explore  ·  [dim]q[/] to quit",
@@ -421,33 +350,12 @@ class DepTreeApp(App[None]):
 
     def on_mount(self) -> None:
         self.sub_title = "Dependency Tree Explorer"
-        # Start the tree animation
-        self._anim_timer = self.set_interval(0.3, self._animate_tree)
-
-    def _animate_tree(self) -> None:
-        """Advance the tree animation frame."""
-        if self._main_started:
-            # Stop animation once main view is shown
-            if self._anim_timer:
-                self._anim_timer.stop()
-                self._anim_timer = None
-            return
-        self._anim_frame = (self._anim_frame + 1) % len(TREE_FRAMES)
-        try:
-            anim_widget = self.query_one("#welcome_tree_anim", Static)
-            anim_widget.update(TREE_FRAMES[self._anim_frame])
-        except Exception:
-            pass
 
     def action_start_main(self) -> None:
         """Transition from welcome screen to main view."""
         if self._main_started:
             return
         self._main_started = True
-        # Stop animation
-        if self._anim_timer:
-            self._anim_timer.stop()
-            self._anim_timer = None
         # Hide welcome, show main
         try:
             self.query_one("#welcome_container").styles.display = "none"
