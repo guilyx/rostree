@@ -8,7 +8,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static, Tree
 from textual.widgets.tree import TreeNode
@@ -16,18 +16,82 @@ from textual.widgets.tree import TreeNode
 from rostree.api import build_tree, list_known_packages_by_source
 
 # Welcome banner: ROSTREE
-WELCOME_BANNER = """
-[bold cyan]
+WELCOME_BANNER = """[bold cyan]
 ██████╗  ██████╗ ███████╗████████╗██████╗ ███████╗███████╗
 ██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔════╝
 ██████╔╝██║   ██║███████╗   ██║   ██████╔╝█████╗  █████╗
 ██╔══██╗██║   ██║╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══╝
 ██║  ██║╚██████╔╝███████║   ██║   ██║  ██║███████╗███████╗
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
-[/bold cyan]
-"""
+[/bold cyan]"""
 
-WELCOME_BODY = """[dim]Explore ROS 2 package dependencies interactively.[/]"""
+WELCOME_DESC = "[dim]Explore ROS 2 package dependencies interactively.[/]"
+
+# Animated tree frames for welcome screen (dependency tree expanding)
+TREE_FRAMES = [
+    # Frame 0: seed
+    """[cyan]
+        ●
+[/cyan]""",
+    # Frame 1: sprouting
+    """[cyan]
+        ●
+        │
+[/cyan]""",
+    # Frame 2: first branch
+    """[cyan]
+        ●
+        ├──●
+        │
+[/cyan]""",
+    # Frame 3: growing
+    """[cyan]
+        ●
+        ├──●
+        │  └──●
+        │
+[/cyan]""",
+    # Frame 4: second branch
+    """[cyan]
+        ●
+        ├──●
+        │  └──●
+        └──●
+[/cyan]""",
+    # Frame 5: more leaves
+    """[cyan]
+        ●
+        ├──●
+        │  ├──●
+        │  └──●
+        └──●
+           └──●
+[/cyan]""",
+    # Frame 6: full tree
+    """[cyan]
+        ●
+        ├──●
+        │  ├──●
+        │  │  └──●
+        │  └──●
+        └──●
+           └──●
+              └──●
+[/cyan]""",
+    # Frame 7: even fuller
+    """[cyan]
+        ●
+        ├──●
+        │  ├──●
+        │  │  └──●
+        │  └──●
+        │     └──●
+        └──●
+           ├──●
+           └──●
+              └──●
+[/cyan]""",
+]
 
 # Limits to avoid huge trees and crashes
 MAX_PACKAGES_PER_SOURCE = 80  # max package names per source section
@@ -113,47 +177,6 @@ def _expand_to_depth(tn: TreeNode, depth: int, current: int = 0) -> None:
             _expand_to_depth(child, depth, current + 1)
     except Exception:
         pass
-
-
-class WelcomeScreen(ModalScreen[bool]):
-    """Welcome screen. Press Enter to browse packages, q to quit."""
-
-    BINDINGS = [
-        Binding("enter", "start", "Start", show=True),
-        Binding("q", "quit", "Quit", show=True),
-    ]
-
-    DEFAULT_CSS = """
-    WelcomeScreen {
-        align: center middle;
-    }
-    WelcomeScreen #banner {
-        text-align: center;
-    }
-    WelcomeScreen #welcome_body {
-        text-align: center;
-        padding: 1 0;
-    }
-    WelcomeScreen #welcome_footer {
-        text-align: center;
-        padding-top: 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        yield Static(WELCOME_BANNER, id="banner", markup=True)
-        yield Static(WELCOME_BODY, id="welcome_body", markup=True)
-        yield Static(
-            "[cyan]Enter[/] to start  ·  [dim]q[/] to quit",
-            id="welcome_footer",
-            markup=True,
-        )
-
-    def action_start(self) -> None:
-        self.dismiss(True)
-
-    def action_quit(self) -> None:
-        self.dismiss(False)
 
 
 class SearchScreen(ModalScreen[str | None]):
@@ -300,6 +323,7 @@ class DepTreeApp(App[None]):
 
     TITLE = "rostree"
     BINDINGS = [
+        Binding("enter", "start_main", "Start", show=False),
         Binding("escape", "back", "Back", show=True),
         Binding("b", "back", "Back", show=False),
         Binding("a", "add_source", "Add source"),
@@ -324,8 +348,37 @@ class DepTreeApp(App[None]):
         self._search_matches: list[TreeNode] = []
         self._search_index: int = 0
         self._details_visible: bool = True
+        self._anim_frame: int = 0
+        self._anim_timer: Any = None
 
     DEFAULT_CSS = """
+    /* Welcome screen styles */
+    #welcome_container {
+        align: center middle;
+        width: 100%;
+        height: 100%;
+    }
+    #welcome_banner {
+        text-align: center;
+        width: auto;
+    }
+    #welcome_tree_anim {
+        text-align: center;
+        width: auto;
+        height: 12;
+    }
+    #welcome_desc {
+        text-align: center;
+        padding: 1 0;
+    }
+    #welcome_hint {
+        text-align: center;
+        padding-top: 1;
+    }
+    /* Main view styles */
+    #main_container {
+        display: none;
+    }
     #nav_hint {
         display: none;
         height: auto;
@@ -343,27 +396,65 @@ class DepTreeApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static(
-            "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
-            id="nav_hint",
-        )
-        yield Tree("Dependencies", id="dep_tree")
-        yield Static(
-            "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
-            id="details",
-        )
+        # Welcome view (initial)
+        with Container(id="welcome_container"):
+            yield Static(WELCOME_BANNER, id="welcome_banner", markup=True)
+            yield Static(TREE_FRAMES[0], id="welcome_tree_anim", markup=True)
+            yield Static(WELCOME_DESC, id="welcome_desc", markup=True)
+            yield Static(
+                "[cyan]Enter[/] to explore  ·  [dim]q[/] to quit",
+                id="welcome_hint",
+                markup=True,
+            )
+        # Main view (hidden initially)
+        with Container(id="main_container"):
+            yield Static(
+                "[dim]← Press [bold]Esc[/bold] or [bold]b[/bold] to return to package list[/]",
+                id="nav_hint",
+            )
+            yield Tree("Dependencies", id="dep_tree")
+            yield Static(
+                "[dim]↑/↓[/] move  ·  [dim]Enter[/]/[dim]Space[/] select  ·  [dim]Esc[/]/[dim]b[/] = Back",
+                id="details",
+            )
         yield Footer()
 
     def on_mount(self) -> None:
-        self.sub_title = "Tab = move focus · Esc = Back · Keys shown in footer"
-        self.push_screen(WelcomeScreen(), self._on_welcome_done)
+        self.sub_title = "Dependency Tree Explorer"
+        # Start the tree animation
+        self._anim_timer = self.set_interval(0.3, self._animate_tree)
 
-    def _on_welcome_done(self, start: bool) -> None:
-        if not start:
-            self.exit(0)
+    def _animate_tree(self) -> None:
+        """Advance the tree animation frame."""
+        if self._main_started:
+            # Stop animation once main view is shown
+            if self._anim_timer:
+                self._anim_timer.stop()
+                self._anim_timer = None
+            return
+        self._anim_frame = (self._anim_frame + 1) % len(TREE_FRAMES)
+        try:
+            anim_widget = self.query_one("#welcome_tree_anim", Static)
+            anim_widget.update(TREE_FRAMES[self._anim_frame])
+        except Exception:
+            pass
+
+    def action_start_main(self) -> None:
+        """Transition from welcome screen to main view."""
+        if self._main_started:
             return
         self._main_started = True
-        self._start_main()
+        # Stop animation
+        if self._anim_timer:
+            self._anim_timer.stop()
+            self._anim_timer = None
+        # Hide welcome, show main
+        try:
+            self.query_one("#welcome_container").styles.display = "none"
+            self.query_one("#main_container").styles.display = "block"
+        except Exception:
+            pass
+        self._load_main_view()
 
     def _source_color(self, label: str) -> str:
         if "System" in label:
@@ -376,7 +467,7 @@ class DepTreeApp(App[None]):
             return COLOR_ADDED
         return COLOR_SOURCE
 
-    def _start_main(self) -> None:
+    def _load_main_view(self) -> None:
         try:
             try:
                 self.query_one("#nav_hint").styles.display = "none"
@@ -532,7 +623,7 @@ class DepTreeApp(App[None]):
             pass
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
-        self._start_main()
+        self._load_main_view()
 
     def action_refresh(self) -> None:
         if not self._main_started:
@@ -542,7 +633,7 @@ class DepTreeApp(App[None]):
         else:
             tree = self.query_one("#dep_tree", Tree)
             self._clear_tree(tree)
-            self._start_main()
+            self._load_main_view()
 
     def action_expand_all(self) -> None:
         tree = self.query_one("#dep_tree", Tree)
