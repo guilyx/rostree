@@ -16,14 +16,16 @@ from textual.widgets.tree import TreeNode
 from rostree.api import build_tree, list_known_packages_by_source
 
 # Welcome banner: ROSTREE
-WELCOME_BANNER = """[bold cyan]
+WELCOME_BANNER = """
+[bold cyan]
 ██████╗  ██████╗ ███████╗████████╗██████╗ ███████╗███████╗
 ██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔════╝
 ██████╔╝██║   ██║███████╗   ██║   ██████╔╝█████╗  █████╗
 ██╔══██╗██║   ██║╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══╝
 ██║  ██║╚██████╔╝███████║   ██║   ██║  ██║███████╗███████╗
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
-[/bold cyan]"""
+[/bold cyan]
+"""
 
 WELCOME_DESC = """[dim]Navigate and visualize ROS 2 package dependency trees.
 Discover packages from your workspace, system installs, and custom paths.
