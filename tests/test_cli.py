@@ -716,7 +716,12 @@ class TestMain:
         except SystemExit as e:
             assert e.code == 0
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        # Version is dynamic from package metadata (or fallback when not installed)
+        assert "rostree" in captured.out
+        # Should contain a version pattern (X.Y.Z or 0.0.0+unknown for dev)
+        import re
+
+        assert re.search(r"\d+\.\d+\.\d+", captured.out)
 
     def test_help(self, capsys) -> None:
         try:
