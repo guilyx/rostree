@@ -8,7 +8,18 @@ from pathlib import Path
 from unittest import mock
 
 
-from rostree.cli import cmd_scan, cmd_list, cmd_tree, main, _print_tree_text
+from rostree.cli import (
+    cmd_scan,
+    cmd_list,
+    cmd_tree,
+    cmd_graph,
+    main,
+    _print_tree_text,
+    _generate_dot,
+    _generate_mermaid,
+    _collect_edges,
+    _mermaid_id,
+)
 from rostree.core.tree import DependencyNode
 
 
@@ -752,3 +763,366 @@ class TestMain:
     def test_tree_command(self) -> None:
         result = main(["tree", "nonexistent_test_pkg"])
         assert result == 0  # Returns placeholder node
+
+    def test_graph_help(self, capsys) -> None:
+        try:
+            main(["graph", "--help"])
+        except SystemExit as e:
+            assert e.code == 0
+        captured = capsys.readouterr()
+        assert "graph" in captured.out
+        assert "--format" in captured.out
+        assert "--workspace" in captured.out
+
+
+class TestGraphHelpers:
+    """Tests for graph generation helper functions."""
+
+    def test_collect_edges_simple(self) -> None:
+        child = DependencyNode(name="child", version="1.0", description="", path="")
+        parent = DependencyNode(
+            name="parent", version="1.0", description="", path="", children=[child]
+        )
+        edges: set[tuple[str, str]] = set()
+        _collect_edges(parent, edges)
+        assert ("parent", "child") in edges
+
+    def test_collect_edges_skips_cycle(self) -> None:
+        cycle_node = DependencyNode(name="cyclic", version="", description="(cycle)", path="")
+        parent = DependencyNode(
+            name="parent", version="1.0", description="", path="", children=[cycle_node]
+        )
+        edges: set[tuple[str, str]] = set()
+        _collect_edges(parent, edges)
+        # Should not include edge to cycle node
+        assert ("parent", "cyclic") not in edges
+
+    def test_collect_edges_skips_not_found(self) -> None:
+        missing = DependencyNode(name="missing", version="", description="(not found)", path="")
+        parent = DependencyNode(
+            name="parent", version="1.0", description="", path="", children=[missing]
+        )
+        edges: set[tuple[str, str]] = set()
+        _collect_edges(parent, edges)
+        assert ("parent", "missing") not in edges
+
+    def test_mermaid_id_replaces_dash(self) -> None:
+        assert _mermaid_id("my-package") == "my_package"
+
+    def test_mermaid_id_replaces_dot(self) -> None:
+        assert _mermaid_id("pkg.name") == "pkg_name"
+
+    def test_generate_dot_single_node(self) -> None:
+        node = DependencyNode(name="test", version="1.0", description="", path="")
+        output = _generate_dot([node])
+        assert "digraph dependencies" in output
+        assert '"test"' in output
+        assert "fillcolor=lightblue" in output
+
+    def test_generate_dot_with_edges(self) -> None:
+        child = DependencyNode(name="child", version="1.0", description="", path="")
+        parent = DependencyNode(
+            name="parent", version="1.0", description="", path="", children=[child]
+        )
+        output = _generate_dot([parent])
+        assert '"parent" -> "child"' in output
+
+    def test_generate_dot_with_title(self) -> None:
+        node = DependencyNode(name="test", version="1.0", description="", path="")
+        output = _generate_dot([node], title="My Graph")
+        assert 'label="My Graph"' in output
+
+    def test_generate_mermaid_single_node(self) -> None:
+        node = DependencyNode(name="test", version="1.0", description="", path="")
+        output = _generate_mermaid([node])
+        assert "graph LR" in output
+        assert "test[test]" in output
+
+    def test_generate_mermaid_with_edges(self) -> None:
+        child = DependencyNode(name="child", version="1.0", description="", path="")
+        parent = DependencyNode(
+            name="parent", version="1.0", description="", path="", children=[child]
+        )
+        output = _generate_mermaid([parent])
+        assert "parent --> child" in output
+
+    def test_generate_mermaid_with_title(self) -> None:
+        node = DependencyNode(name="test", version="1.0", description="", path="")
+        output = _generate_mermaid([node], title="My Graph")
+        assert "title: My Graph" in output
+
+
+class TestCmdGraph:
+    """Tests for cmd_graph command."""
+
+    def test_single_package(self, tmp_path: Path, capsys) -> None:
+        """Test graphing a single package."""
+        pkg = tmp_path / "graph_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>graph_pkg</name>
+    <version>1.0.0</version>
+    <description>Graph test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="graph_pkg",
+                workspace=None,
+                format="dot",
+                output=None,
+                depth=None,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 0
+            assert "digraph dependencies" in captured.out
+            assert "graph_pkg" in captured.out
+
+    def test_mermaid_format(self, tmp_path: Path, capsys) -> None:
+        """Test mermaid output format."""
+        pkg = tmp_path / "mermaid_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>mermaid_pkg</name>
+    <version>1.0.0</version>
+    <description>Mermaid test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="mermaid_pkg",
+                workspace=None,
+                format="mermaid",
+                output=None,
+                depth=None,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 0
+            assert "graph LR" in captured.out
+
+    def test_output_to_file(self, tmp_path: Path, capsys) -> None:
+        """Test writing graph to file."""
+        pkg = tmp_path / "file_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>file_pkg</name>
+    <version>1.0.0</version>
+    <description>File test</description>
+</package>
+"""
+        )
+        output_file = tmp_path / "output.dot"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="file_pkg",
+                workspace=None,
+                format="dot",
+                output=str(output_file),
+                depth=None,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            assert result == 0
+            assert output_file.exists()
+            content = output_file.read_text()
+            assert "digraph dependencies" in content
+
+    def test_workspace_flag(self, tmp_path: Path, capsys) -> None:
+        """Test graphing a workspace."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        src = ws / "src"
+        src.mkdir()
+        pkg = src / "ws_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>ws_pkg</name>
+    <version>1.0.0</version>
+    <description>WS test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package=None,
+                workspace=str(ws),
+                format="dot",
+                output=None,
+                depth=2,
+                runtime=False,
+                source=None,
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 0
+            assert "ws_pkg" in captured.out
+
+    def test_no_title_flag(self, tmp_path: Path, capsys) -> None:
+        """Test --no-title flag."""
+        pkg = tmp_path / "notitle_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>notitle_pkg</name>
+    <version>1.0.0</version>
+    <description>No title test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="notitle_pkg",
+                workspace=None,
+                format="dot",
+                output=None,
+                depth=None,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=True,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 0
+            assert "label=" not in captured.out
+
+    def test_empty_workspace_error(self, tmp_path: Path, capsys) -> None:
+        """Test error when workspace has no packages."""
+        ws = tmp_path / "empty_ws"
+        ws.mkdir()
+        (ws / "src").mkdir()
+
+        args = argparse.Namespace(
+            package=None,
+            workspace=str(ws),
+            format="dot",
+            output=None,
+            depth=2,
+            runtime=False,
+            source=None,
+            no_title=False,
+        )
+        result = cmd_graph(args)
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No packages found" in captured.err
+
+    def test_no_workspace_no_package_error(self, capsys) -> None:
+        """Test error when no package specified and no workspace packages found."""
+        with mock.patch("rostree.cli.list_packages_by_source", return_value={}):
+            args = argparse.Namespace(
+                package=None,
+                workspace=None,
+                format="dot",
+                output=None,
+                depth=None,
+                runtime=False,
+                source=None,
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            captured = capsys.readouterr()
+            assert result == 1
+            assert "No workspace packages found" in captured.err
+
+    def test_depth_limit(self, tmp_path: Path) -> None:
+        """Test depth limiting."""
+        pkg = tmp_path / "depth_pkg"
+        pkg.mkdir()
+        (pkg / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+    <name>depth_pkg</name>
+    <version>1.0.0</version>
+    <description>Depth test</description>
+</package>
+"""
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = argparse.Namespace(
+                package="depth_pkg",
+                workspace=None,
+                format="dot",
+                output=None,
+                depth=1,
+                runtime=False,
+                source=[str(tmp_path)],
+                no_title=False,
+            )
+            result = cmd_graph(args)
+            assert result == 0

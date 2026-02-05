@@ -1,81 +1,172 @@
 # Usage
 
-## TUI (terminal)
+## CLI Commands
+
+### `rostree` (default: TUI)
 
 ```bash
-# List known packages and select one to explore
-rosdep_viz
-
-# Open tree for a specific package
-rosdep_viz rosbag2_bringup
+rostree                      # Launch interactive TUI
+rostree tui                  # Same as above
+rostree tui rclpy            # Start TUI with a specific package tree
 ```
+
+### `rostree scan`
+
+Discover ROS 2 workspaces on the host machine.
+
+```bash
+rostree scan                 # Scan default locations (~/ros*_ws, /opt/ros/*, etc.)
+rostree scan ~/dev --depth 3 # Scan specific directories
+rostree scan --no-home       # Skip home directory
+rostree scan --no-system     # Skip /opt/ros system installs
+rostree scan --json          # Output as JSON
+rostree scan -v              # Verbose: show packages in each workspace
+```
+
+### `rostree list`
+
+List known ROS 2 packages in the current environment.
+
+```bash
+rostree list                 # List all packages
+rostree list --by-source     # Group by source (System, Workspace, etc.)
+rostree list -v              # Show package paths
+rostree list --json          # Output as JSON
+rostree list -s /extra/src   # Add extra source directories
+```
+
+### `rostree tree`
+
+Show dependency tree for a package.
+
+```bash
+rostree tree rclpy           # Show full dependency tree
+rostree tree rclpy -d 3      # Limit depth to 3 levels
+rostree tree rclpy -r        # Runtime-only (depend + exec_depend)
+rostree tree rclpy --json    # Output as JSON
+rostree tree rclpy -s /src   # Add extra source directories
+```
+
+### `rostree graph`
+
+Generate dependency graphs in DOT (Graphviz) or Mermaid format.
+
+```bash
+# Single package
+rostree graph rclpy                    # DOT format to stdout
+rostree graph rclpy -f mermaid         # Mermaid format
+rostree graph rclpy -o deps.dot        # Write to file
+rostree graph rclpy -d 3               # Limit depth
+
+# Entire workspace (current environment)
+rostree graph                          # Graph all non-system packages
+rostree graph -d 2                     # Limit depth for performance
+
+# Specific workspace
+rostree graph -w ~/ros2_ws             # Scan and graph workspace
+rostree graph -w ~/ros2_ws -f mermaid  # Mermaid format
+
+# Options
+rostree graph rclpy -r                 # Runtime-only dependencies
+rostree graph rclpy --no-title         # No title in graph
+```
+
+**Rendering graphs:**
+
+```bash
+# DOT → PNG (requires graphviz)
+rostree graph rclpy -o deps.dot
+dot -Tpng deps.dot -o deps.png
+
+# DOT → SVG
+dot -Tsvg deps.dot -o deps.svg
+
+# Mermaid → view online
+rostree graph rclpy -f mermaid | pbcopy  # Copy to clipboard
+# Paste at https://mermaid.live
+```
+
+---
+
+## TUI (Terminal UI)
 
 ### Flow
 
-1. **Welcome screen** — Banner and short description. Press **Enter** to start, **q** to quit.
-2. **Package list** — All packages from the environment (see [Package discovery](package-discovery.md)). Select a package to load its dependency tree.
-3. **Tree view** — Dependency tree (runtime-only, max depth 6 by default). Select a node to see details (name, version, description, path, stats).
+1. **Welcome screen** — Banner and description. Press **Enter** to start, **q** to quit.
+2. **Package list** — Packages grouped by source (System, Workspace, etc.). Select a package to load its tree.
+3. **Tree view** — Dependency tree with details panel. Navigate with arrow keys.
 
 ### Keys
 
 | Key | Action |
 |-----|--------|
-| **Esc** or **b** | Back to package list (when viewing a tree) |
-| **q** | Quit |
-| **r** | Refresh (reload current tree or package list) |
+| **Enter** | Select/expand |
+| **Esc** or **b** | Back to package list |
+| **/** or **f** | Search for packages |
+| **n** / **N** | Next/previous search match |
+| **d** | Toggle details panel |
 | **e** | Expand all tree nodes |
-| **c** | Collapse all (root stays expanded) |
+| **c** | Collapse all |
+| **a** | Add extra source path |
+| **r** | Refresh |
+| **q** | Quit |
 
-A **“← Back to package list”** button appears above the tree when viewing a dependency tree; you can click it or use Esc / b.
-
-### Details panel stats
+### Details Panel
 
 For the selected node:
 
-- **Direct dependencies** — Number of immediate children.
-- **Total descendants** — All nodes below (children + grandchildren + …).
-- **Max depth from here** — Number of levels below this node.
+- **Direct dependencies** — Immediate children count
+- **Total descendants** — All nodes below
+- **Max depth** — Levels below this node
 
-### TUI tree limits
+### TUI Limits
 
-- **Runtime-only**: only `depend` and `exec_depend` (no build/test deps), so trees load faster.
-- **Max depth**: 6 levels.
-- **Max nodes**: 500 (truncation message shown beyond that).
-
-See [Dependency trees](dependency-trees.md) for runtime-only vs full tree.
+- **Runtime-only**: Only `depend` and `exec_depend` (faster)
+- **Max depth**: 6 levels
+- **Max nodes**: 500 (truncated beyond)
 
 ---
 
 ## Python API
 
 ```python
-from rosdep_viz import list_known_packages, get_package_info, build_tree
+from rostree import (
+    list_known_packages,
+    list_known_packages_by_source,
+    get_package_info,
+    build_tree,
+    scan_workspaces,
+)
 
-# All packages in the environment (name -> path to package.xml)
+# List all packages
 packages = list_known_packages()  # dict[str, Path]
 
-# Metadata and dependencies for one package (no recursion)
-info = get_package_info("rosbag2_bringup")
-# info.name, info.version, info.description, info.dependencies
+# Group by source
+by_source = list_known_packages_by_source()  # dict[str, list[str]]
 
-# Full dependency tree
-root = build_tree("rosbag2_bringup", max_depth=5)
-if root:
-    print(root.name, root.version, len(root.children))
-    data = root.to_dict()  # JSON-friendly for API/frontend
+# Package metadata
+info = get_package_info("rclpy")
+print(info.name, info.version, info.dependencies)
+
+# Build dependency tree
+root = build_tree("rclpy", max_depth=5, runtime_only=True)
+print(root.name, len(root.children))
+data = root.to_dict()  # JSON-friendly
+
+# Scan for workspaces
+workspaces = scan_workspaces()  # list[WorkspaceInfo]
+for ws in workspaces:
+    print(ws.path, ws.packages)
 ```
 
 ### Options
 
-- **build_tree(name, max_depth=None, include_buildtool=False, runtime_only=False)**  
-  - `max_depth`: limit depth (None = unlimited).  
-  - `runtime_only=True`: only depend + exec_depend (smaller, faster).
+- **build_tree(name, max_depth=None, runtime_only=False, extra_source_roots=None)**
+  - `max_depth`: Limit recursion depth
+  - `runtime_only=True`: Only depend + exec_depend (faster, smaller)
+  - `extra_source_roots`: Additional paths to scan for packages
 
----
-
-## Web app
-
-- **Backend**: FastAPI in `rosdep_viz_webapp/backend`. Endpoints: `GET /api/packages`, `GET /api/tree/{package_name}?max_depth=N`.
-- **Frontend**: React + Vite + Tailwind in `rosdep_viz_webapp/frontend`. Load packages, select one, view interactive dependency graph (React Flow).
-
-See `rosdep_viz_webapp/README.md` for run instructions. The backend uses this package for all ROS 2 logic; no extra docs needed here.
+- **scan_workspaces(roots=None, max_depth=4, include_home=True, include_opt_ros=True)**
+  - `roots`: Directories to scan (default: common locations)
+  - `include_home`: Scan ~/ros*_ws, ~/dev, etc.
+  - `include_opt_ros`: Include /opt/ros/* system installs
