@@ -1585,19 +1585,20 @@ class TestOpenFile:
                 assert "open" in str(mock_run.call_args)
 
     def test_open_file_windows(self, tmp_path: Path) -> None:
-        """Test opening file on Windows."""
+        """Windows uses os.startfile, so no shell is involved."""
         from rostree.cli import _open_file
 
         test_file = tmp_path / "test.png"
         test_file.touch()
 
+        startfile = mock.MagicMock()
         with mock.patch("platform.system", return_value="Windows"):
-            with mock.patch("subprocess.run") as mock_run:
-                mock_run.return_value = mock.MagicMock()
-                result = _open_file(test_file)
-                assert result is True
-                mock_run.assert_called_once()
-                assert "start" in str(mock_run.call_args)
+            with mock.patch.object(os, "startfile", startfile, create=True):
+                with mock.patch("subprocess.run") as mock_run:
+                    result = _open_file(test_file)
+                    assert result is True
+                    startfile.assert_called_once_with(str(test_file))
+                    mock_run.assert_not_called()
 
     def test_open_file_error(self, tmp_path: Path, capsys) -> None:
         """Test opening file when error occurs."""

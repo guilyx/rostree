@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -738,7 +739,7 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
 
     try:
         result = subprocess.run(
-            ["dot", f"-T{format}", "-o", str(output_path)],
+            [_resolve_tool("dot"), f"-T{format}", "-o", str(output_path)],
             input=dot_content,
             capture_output=True,
             text=True,
@@ -756,16 +757,23 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
         return False
 
 
+def _resolve_tool(name: str) -> str:
+    """Absolute path to an external tool, so we never hand a bare name to exec."""
+    return shutil.which(name) or name
+
+
 def _open_file(path: Path) -> bool:
     """Open a file with the system default application."""
     system = platform.system()
     try:
-        if system == "Darwin":  # macOS
-            subprocess.run(["open", str(path)], check=True)
-        elif system == "Windows":
-            subprocess.run(["start", "", str(path)], shell=True, check=True)
+        if system == "Windows":
+            # os.startfile is the documented way to do this on Windows and takes
+            # no shell, so a path with shell metacharacters cannot be misread.
+            os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
+        elif system == "Darwin":  # macOS
+            subprocess.run([_resolve_tool("open"), str(path)], check=True)
         else:  # Linux and others
-            subprocess.run(["xdg-open", str(path)], check=True)
+            subprocess.run([_resolve_tool("xdg-open"), str(path)], check=True)
         return True
     except Exception as e:
         print(f"Could not open file: {e}", file=sys.stderr)

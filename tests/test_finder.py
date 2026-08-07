@@ -172,7 +172,7 @@ class TestIsSystemPrefix:
 
     def test_non_system(self) -> None:
         assert _is_system_prefix(Path("/home/user/ros_ws/install")) is False
-        assert _is_system_prefix(Path("/tmp/ws")) is False
+        assert _is_system_prefix(Path("/srv/ws")) is False
 
 
 class TestWorkspaceRootFromPrefix:

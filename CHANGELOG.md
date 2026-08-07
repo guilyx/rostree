@@ -84,6 +84,9 @@ them near-instant and reworks the interface around them.
   `quick_package_name()` helper.
 - Worker results in the TUI are routed to the callback that asked for them, rather
   than to whichever handler saw the completion event first.
+- `--open` no longer goes through a shell on Windows: it uses `os.startfile`, so a
+  path containing shell metacharacters cannot be misinterpreted. External tools
+  (`dot`, `open`, `xdg-open`) are resolved to absolute paths before being executed.
 
 ### Changed
 
