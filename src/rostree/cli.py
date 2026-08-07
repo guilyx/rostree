@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape, quoteattr
 
 from rich.console import Console
 from rich.text import Text
@@ -711,42 +712,52 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 1
 
 
+def _junit_case(name: str, failures: list[str], *, message: str, kind: str) -> str:
+    """One <testcase>, failing with the given detail lines if there are any."""
+    attrs = f'classname="rostree" name={quoteattr(name)}'
+    if not failures:
+        return f"  <testcase {attrs} />"
+    detail = escape("\n".join(failures))
+    return (
+        f"  <testcase {attrs}>\n"
+        f"    <failure message={quoteattr(message)} type={quoteattr(kind)}>{detail}</failure>\n"
+        f"  </testcase>"
+    )
+
+
 def _write_junit(path: Path, roots: list[str], cycles: list[list[str]], missing: list[str]) -> None:
-    """Emit a JUnit report so CI dashboards can show what `check` found."""
-    from xml.etree.ElementTree import Element, ElementTree, SubElement
+    """
+    Emit a JUnit report so CI dashboards can show what `check` found.
 
-    suite = Element(
-        "testsuite",
-        name="rostree check",
-        tests=str(2),
-        failures=str(bool(cycles) + bool(missing)),
+    Written directly rather than through an XML library: the document has a fixed
+    shape, the only variable parts are package names, and ``quoteattr``/``escape``
+    handle those. It also keeps an XML *parser* out of a module that never reads
+    XML — every XXE lint rule keys on that import.
+    """
+    failure_count = bool(cycles) + bool(missing)
+    body = "\n".join(
+        [
+            "<?xml version='1.0' encoding='utf-8'?>",
+            f'<testsuite name="rostree check" tests="2" failures="{failure_count}" '
+            f"package={quoteattr(','.join(roots[:20]))}>",
+            _junit_case(
+                "no dependency cycles",
+                [" -> ".join(cycle) for cycle in cycles],
+                message=f"{len(cycles)} dependency cycle(s)",
+                kind="DependencyCycle",
+            ),
+            _junit_case(
+                "all dependencies resolve",
+                list(missing),
+                message=f"{len(missing)} unresolved dependency name(s)",
+                kind="UnresolvedDependency",
+            ),
+            "</testsuite>",
+            "",
+        ]
     )
-    cycle_case = SubElement(suite, "testcase", classname="rostree", name="no dependency cycles")
-    if cycles:
-        failure = SubElement(
-            cycle_case,
-            "failure",
-            message=f"{len(cycles)} dependency cycle(s)",
-            type="DependencyCycle",
-        )
-        failure.text = "\n".join(" -> ".join(cycle) for cycle in cycles)
-
-    missing_case = SubElement(
-        suite, "testcase", classname="rostree", name="all dependencies resolve"
-    )
-    if missing:
-        failure = SubElement(
-            missing_case,
-            "failure",
-            message=f"{len(missing)} unresolved dependency name(s)",
-            type="UnresolvedDependency",
-        )
-        failure.text = "\n".join(missing)
-
-    suite.set("hostname", "")
-    suite.set("package", ",".join(roots[:20]))
     path.parent.mkdir(parents=True, exist_ok=True)
-    ElementTree(suite).write(path, encoding="utf-8", xml_declaration=True)
+    path.write_text(body, encoding="utf-8")
 
 
 def cmd_tui(args: argparse.Namespace) -> int:

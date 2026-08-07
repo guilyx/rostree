@@ -7,8 +7,10 @@ import json
 import os
 from pathlib import Path
 from unittest import mock
+from xml.etree import ElementTree
 
 from rostree.cli import cmd_check, cmd_rdeps, cmd_tree, cmd_why
+from rostree.core.tree import build_dependency_graph
 from tests.conftest import write_package
 
 EMPTY_ENV = {
@@ -434,3 +436,71 @@ class TestFilterFlags:
             )
         assert result == 0
         assert "<failure" not in report.read_text()
+
+
+class TestJUnitReport:
+    """The JUnit report is written by hand, so escaping is worth pinning down."""
+
+    def test_report_is_well_formed_xml(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app", depends=["missing_key"])
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        # Parsing it back is the real assertion: malformed XML raises here.
+        root = ElementTree.parse(report).getroot()
+        assert root.tag == "testsuite"
+        assert root.get("tests") == "2"
+        assert root.get("failures") == "1"
+        cases = root.findall("testcase")
+        assert [c.get("name") for c in cases] == [
+            "no dependency cycles",
+            "all dependencies resolve",
+        ]
+        assert cases[0].find("failure") is None
+        assert "missing_key" in cases[1].find("failure").text
+
+    def test_cycles_are_reported_as_a_failing_case(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "a", depends=["b"])
+        write_package(tmp_path, "b", depends=["a"])
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["a"], ignore_system=False, junit=str(report)))
+        root = ElementTree.parse(report).getroot()
+        failure = root.findall("testcase")[0].find("failure")
+        assert failure.get("type") == "DependencyCycle"
+        assert "a -> b -> a" in failure.text
+
+    def test_xml_metacharacters_in_names_are_escaped(self, tmp_path: Path) -> None:
+        """A dependency name is arbitrary text; it must not break the document."""
+        pkg = tmp_path / "app"
+        pkg.mkdir()
+        # Entities in the manifest, so the *parsed* name really holds < and &.
+        pkg.joinpath("package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <depend>weird&lt;&amp;name</depend>
+</package>
+"""
+        )
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        # Parsing succeeds only if the writer escaped the name properly.
+        root = ElementTree.parse(report).getroot()
+        text = root.findall("testcase")[1].find("failure").text
+        assert "weird<&name" in text
+
+    def test_root_names_are_escaped_in_attributes(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app")
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            with mock.patch(
+                "rostree.cli.build_dependency_graph",
+                side_effect=build_dependency_graph,
+            ):
+                cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        root = ElementTree.parse(report).getroot()
+        assert root.get("package") == "app"
