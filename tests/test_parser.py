@@ -2,11 +2,10 @@
 
 from pathlib import Path
 
-
 from rostree.core.parser import (
-    parse_package_xml,
     PackageInfo,
     _is_ros_package_dependency,
+    parse_package_xml,
 )
 
 
@@ -33,9 +32,19 @@ class TestIsRosPackageDependency:
     def test_python3_prefix(self) -> None:
         assert _is_ros_package_dependency("python3-something") is False
 
-    def test_lib_prefix(self) -> None:
+    def test_dashed_rosdep_keys_are_not_ros_packages(self) -> None:
+        """ROS 2 package names cannot contain dashes, so dashed keys are rosdep keys."""
         assert _is_ros_package_dependency("libboost-dev") is False
-        assert _is_ros_package_dependency("libpng") is False
+        assert _is_ros_package_dependency("ros-humble-rclcpp") is False
+        assert _is_ros_package_dependency("qtbase5-dev") is False
+
+    def test_lib_prefix_alone_is_not_disqualifying(self) -> None:
+        """libstatistics_collector and friends are real ROS 2 packages."""
+        assert _is_ros_package_dependency("libstatistics_collector") is True
+        assert _is_ros_package_dependency("libyaml_vendor") is True
+        # Undashed system libs stay candidates; the package index decides whether
+        # they actually resolve, rather than a name heuristic guessing.
+        assert _is_ros_package_dependency("libpng") is True
 
 
 class TestPackageInfo:

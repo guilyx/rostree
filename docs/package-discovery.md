@@ -1,6 +1,6 @@
 # Package discovery
 
-rosdep_viz finds ROS 2 packages **only** from environment variables. It does **not** hardcode `/opt/ros/...` or any path. Whatever you have sourced in the current shell is what it sees.
+rostree finds ROS 2 packages **only** from environment variables. It does **not** hardcode `/opt/ros/...` or any path. Whatever you have sourced in the current shell is what it sees.
 
 ## Install space (where packages are “installed”)
 
@@ -69,7 +69,7 @@ The finder then **walks** that directory tree and looks for any `package.xml` wh
 
 ```bash
 export COLCON_WORKSPACE=/path/to/other_ws
-rosdep_viz
+rostree
 ```
 
 The finder will scan `/path/to/other_ws/src` (or `/path/to/other_ws` if `src` does not exist) for package.xml files and include those packages.
@@ -93,4 +93,35 @@ The finder will scan `/path/to/other_ws/src` (or `/path/to/other_ws` if `src` do
 | `source /path/to/workspace/install/setup.bash` | Same env; adds that workspace’s install and infers `workspace/src` |
 | Set `COLCON_WORKSPACE=/path/to/other_ws` or `ROS2_WORKSPACE` | Scans `other_ws/src` (or the given path) for package.xml files |
 
-Implementation: `src/rosdep_viz/core/finder.py` (`find_package_path`, `list_package_paths`).
+Implementation: `src/rostree/core/index.py` (scanning, `PackageIndex`) and
+`src/rostree/core/finder.py` (`find_package_path`, `list_package_paths`, `scan_for_workspaces`).
+
+## The index
+
+All of the above is done **once per run** by `rostree.core.index.build_index()`,
+which produces a `PackageIndex`: a name → `package.xml` mapping plus the source
+each package came from. Lookups afterwards are dictionary access, not filesystem
+access.
+
+```python
+from rostree.api import get_index
+
+index = get_index()                 # cached per process and per environment
+index.resolve("rclcpp")             # Path | None
+index.get("rclcpp").kind            # SourceKind.SYSTEM / WORKSPACE / OTHER / SOURCE / ADDED
+index.by_label()                    # {"System (/opt/ros/jazzy)": [names...], ...}
+get_index(refresh=True)             # after rebuilding your workspace
+```
+
+Precedence matches the ROS 2 environment: install prefixes before source trees,
+earlier prefixes before later ones. `AMENT_PREFIX_PATH` entries are read before
+`COLCON_PREFIX_PATH` entries.
+
+### What source scans skip
+
+Walking a workspace `src/` is the expensive part, so the scan:
+
+- skips `build/`, `install/`, `log/`, `node_modules/`, `__pycache__`, virtualenvs
+  and dot-directories;
+- skips any directory containing `COLCON_IGNORE`, `AMENT_IGNORE` or `CATKIN_IGNORE`;
+- stops descending as soon as it finds a `package.xml`.

@@ -89,3 +89,6 @@ Thumbs.db
 # Misc
 *.log
 .cache/
+
+# ...but the demo media in the docs is checked in on purpose
+!docs/media/**

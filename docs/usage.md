@@ -30,6 +30,7 @@ List known ROS 2 packages in the current environment.
 ```bash
 rostree list                 # List all packages
 rostree list --by-source     # Group by source (System, Workspace, etc.)
+rostree list -f nav2         # Only packages whose name contains "nav2"
 rostree list -v              # Show package paths
 rostree list --json          # Output as JSON
 rostree list -s /extra/src   # Add extra source directories
@@ -37,14 +38,65 @@ rostree list -s /extra/src   # Add extra source directories
 
 ### `rostree tree`
 
-Show dependency tree for a package.
+Show the dependency tree for a package.
 
 ```bash
-rostree tree rclpy           # Show full dependency tree
+rostree tree rclpy           # Full tree (unlimited depth is fine now)
 rostree tree rclpy -d 3      # Limit depth to 3 levels
 rostree tree rclpy -r        # Runtime-only (depend + exec_depend)
+rostree tree rclpy -v        # Include package descriptions
 rostree tree rclpy --json    # Output as JSON
 rostree tree rclpy -s /src   # Add extra source directories
+```
+
+A package that appears in several branches is expanded where it first appears;
+elsewhere it is summarised as `↩ 5 already shown above: …`. That is what keeps a
+full-depth tree instant instead of exponential — see
+[Dependency trees](dependency-trees.md#repeats-why-trees-stay-small).
+
+```bash
+rostree tree rclpy --expand-repeats   # One line per back-reference
+rostree tree rclpy --full             # Re-expand every occurrence (can be huge)
+rostree tree rclpy --full --max-nodes 5000
+```
+
+The tree goes to stdout and the summary line to stderr, so `rostree tree rclpy > deps.txt`
+captures just the tree.
+
+### `rostree why`
+
+Explain how one package ends up depending on another.
+
+```bash
+rostree why nav2_bringup rcutils       # Shortest paths between the two
+rostree why nav2_bringup rcutils -r    # Runtime dependencies only
+rostree why nav2_bringup rcutils -n 3  # At most 3 paths
+rostree why nav2_bringup rcutils --json
+```
+
+Exits non-zero when there is no dependency path at all.
+
+### `rostree rdeps`
+
+Reverse lookup: what would be affected if this package changed?
+
+```bash
+rostree rdeps rclcpp              # Direct dependents
+rostree rdeps rclcpp -t           # Include indirect dependents
+rostree rdeps rclcpp -w           # Skip packages installed under /opt/ros
+rostree rdeps rclcpp --json
+```
+
+### `rostree check`
+
+Report dependency cycles and unresolved dependencies. Exits non-zero when it finds
+problems, so it can gate CI.
+
+```bash
+rostree check                     # Every workspace package
+rostree check nav2_bringup        # Specific roots
+rostree check --ignore-system     # Ignore names that look like rosdep keys
+rostree check --json
 ```
 
 ### `rostree graph`
@@ -74,7 +126,16 @@ rostree graph -w ~/ros2_ws -f mermaid      # Mermaid format (text only)
 # Options
 rostree graph rclpy -r                 # Runtime-only dependencies
 rostree graph rclpy --no-title         # No title in graph
+rostree graph rclpy --hide-missing     # Omit unresolved dependencies
 ```
+
+Dependencies that do not resolve to a `package.xml` (rosdep keys, packages that
+are not built yet) are drawn **dashed and grey** rather than dropped. Dropping
+them is what used to leave workspace graphs as a set of unconnected boxes. Pass
+`--hide-missing` if you only want edges between packages you actually have.
+
+`-w/--workspace` also puts that workspace on the search path, so it works on a
+workspace you have not sourced.
 
 **Install a rendering backend for `--render`:**
 
@@ -111,40 +172,50 @@ rostree graph rclpy -f mermaid | pbcopy  # Copy to clipboard
 
 ## TUI (Terminal UI)
 
+```bash
+rostree                  # Launch the TUI
+rostree tui nav2_bringup # Open straight into a package's tree
+rostree tui --all-deps   # Follow build and test dependencies too
+```
+
 ### Flow
 
-1. **Welcome screen** — Banner and description. Press **Enter** to start, **q** to quit.
-2. **Package list** — Packages grouped by source (System, Workspace, etc.). Select a package to load its tree.
-3. **Tree view** — Dependency tree with details panel. Navigate with arrow keys.
+1. **Welcome screen** — the package scan starts immediately in the background and
+   reports its count when done. Press **Enter** to continue, **q** to quit.
+2. **Package list** — every package, grouped by source. Press **/** and type to
+   filter across all of them. **Enter** opens a package.
+3. **Tree view** — the dependency tree, with a details panel on the right.
 
 ### Keys
 
 | Key | Action |
 |-----|--------|
-| **Enter** | Select/expand |
-| **Esc** or **b** | Back to package list |
-| **/** or **f** | Search for packages |
-| **n** / **N** | Next/previous search match |
-| **d** | Toggle details panel |
-| **e** | Expand all tree nodes |
-| **c** | Collapse all |
-| **a** | Add extra source path |
-| **r** | Refresh |
+| **?** | Keyboard reference |
+| **/** or **f** | Filter the package list (or search an open tree) |
+| **Enter** | Open the selected package / re-root the tree on it |
+| **Esc** or **b** | Leave the filter, then go back to the package list |
+| **↑ ↓** | Move |
+| **n** / **N** | Next / previous search match |
+| **d** | Show or hide the details panel |
+| **v** | Reverse view: what depends on this package |
+| **t** | Toggle runtime-only vs all dependencies |
+| **e** / **c** | Expand all / collapse all |
+| **a** | Add an extra source path |
+| **r** | Rescan packages |
 | **q** | Quit |
 
-### Details Panel
+### Responsiveness
 
-For the selected node:
+- Scanning and tree building both run on **worker threads**, so the UI never blocks.
+- Tree rows are created **as you expand them**, so opening a package with thousands
+  of transitive dependencies is instant.
+- The package list is **not** truncated; use the filter to narrow it.
 
-- **Direct dependencies** — Immediate children count
-- **Total descendants** — All nodes below
-- **Max depth** — Levels below this node
+### Details panel
 
-### TUI Limits
-
-- **Runtime-only**: Only `depend` and `exec_depend` (faster)
-- **Max depth**: 6 levels
-- **Max nodes**: 500 (truncated beyond)
+For the selected node: version, description, direct dependency count, total
+descendants, depth below this node, which source it came from, and its
+`package.xml` path.
 
 ---
 
@@ -158,6 +229,7 @@ from rostree import (
     build_tree,
     scan_workspaces,
 )
+from rostree.api import build_graph, get_index, reverse_dependencies, tree_stats
 
 # List all packages
 packages = list_known_packages()  # dict[str, Path]
@@ -180,12 +252,36 @@ for ws in workspaces:
     print(ws.path, ws.packages)
 ```
 
+```python
+# Statistics about a built tree
+stats = tree_stats(root)
+# {'nodes': 770, 'packages': 164, 'missing': 5, 'repeats': 543, 'cycles': 0, 'depth': 6}
+
+# The resolved DAG, without materialising a tree
+graph = build_graph("nav2_bringup", runtime_only=True)
+print(len(graph.packages), len(graph.edge_pairs()), graph.cycles())
+
+# Who depends on this package?
+print(reverse_dependencies("rclcpp"))
+
+# The package index itself
+index = get_index()
+print(index.resolve("rclcpp"), len(index), index.by_label().keys())
+```
+
 ### Options
 
-- **build_tree(name, max_depth=None, runtime_only=False, extra_source_roots=None)**
+- **build_tree(name, max_depth=None, runtime_only=False, collapse_repeats=True, extra_source_roots=None)**
   - `max_depth`: Limit recursion depth
   - `runtime_only=True`: Only depend + exec_depend (faster, smaller)
+  - `collapse_repeats=False`: Expand every occurrence of a package instead of
+    referencing the first one. Exponential on real graphs — bound it with
+    `max_depth`.
   - `extra_source_roots`: Additional paths to scan for packages
+
+- **build_graph(root_packages, max_depth=None, runtime_only=False)**
+  - Accepts one name or a list; returns a `DependencyGraph` with `edges`,
+    `packages`, `missing`, `depths` and `cycles()`
 
 - **scan_workspaces(roots=None, max_depth=4, include_home=True, include_opt_ros=True)**
   - `roots`: Directories to scan (default: common locations)

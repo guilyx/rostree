@@ -4,37 +4,204 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.text import Text
+
 from rostree.core.finder import (
+    get_index,
     list_package_paths,
     list_packages_by_source,
     scan_for_workspaces,
 )
-from rostree.core.tree import build_dependency_tree, DependencyNode
+from rostree.core.graph import GraphView, mermaid_id, to_dot, to_mermaid
+from rostree.core.index import PackageIndex, SourceKind
+from rostree.core.tree import (
+    DependencyGraph,
+    DependencyNode,
+    NodeStatus,
+    build_dependency_graph,
+    build_dependency_tree,
+    tree_stats,
+)
+
+# Historical status markers, still recognised on nodes built by older callers.
+_LEGACY_MARKERS = {
+    "(cycle)": NodeStatus.CYCLE,
+    "(not found)": NodeStatus.MISSING,
+    "(parse error)": NodeStatus.PARSE_ERROR,
+    "(see above)": NodeStatus.REPEAT,
+    "(depth limit)": NodeStatus.TRUNCATED,
+}
+
+_STATUS_LABEL = {
+    NodeStatus.REPEAT: ("↩", "see above", "dim"),
+    NodeStatus.CYCLE: ("⟳", "cycle", "yellow"),
+    NodeStatus.MISSING: ("✗", "not found", "red"),
+    NodeStatus.PARSE_ERROR: ("!", "parse error", "red"),
+    NodeStatus.TRUNCATED: ("…", "depth limit", "dim"),
+}
+
+# Published from here since v0.1; the implementation now lives in core.graph.
+_mermaid_id = mermaid_id
+
+_SOURCE_STYLE = {
+    SourceKind.SYSTEM: "dim",
+    SourceKind.WORKSPACE: "green",
+    SourceKind.OTHER: "cyan",
+    SourceKind.SOURCE: "yellow",
+    SourceKind.ADDED: "magenta",
+}
+
+# Graphs of a whole workspace are linear to build now, but Graphviz still has to
+# lay them out, so warn rather than silently truncating.
+GRAPH_DEFAULT_DEPTH = 4
+GRAPH_MAX_PACKAGES = 400
+
+_out = Console(highlight=False, soft_wrap=True)
+_err = Console(stderr=True, highlight=False, soft_wrap=True)
 
 
-def _print_tree_text(node: DependencyNode, indent: int = 0, prefix: str = "") -> None:
-    """Print a dependency tree as indented text."""
-    marker = "├── " if prefix else ""
-    version = f" ({node.version})" if node.version else ""
-    desc = (
-        f" - {node.description}"
-        if node.description and node.description not in ("(not found)", "(cycle)", "(parse error)")
-        else ""
-    )
-    if node.description in ("(not found)", "(cycle)", "(parse error)"):
-        desc = f" [{node.description}]"
-    print(f"{prefix}{marker}{node.name}{version}{desc}")
+def _configure_console(args: argparse.Namespace) -> None:
+    """Honour --no-color (and NO_COLOR, which rich already respects)."""
+    global _out, _err
+    if getattr(args, "no_color", False):
+        _out = Console(highlight=False, soft_wrap=True, no_color=True, force_terminal=False)
+        _err = Console(
+            stderr=True, highlight=False, soft_wrap=True, no_color=True, force_terminal=False
+        )
 
-    children = node.children
+
+def _status_of(node: DependencyNode) -> NodeStatus:
+    """Node status, falling back to the legacy description markers."""
+    if node.status is not NodeStatus.OK:
+        return node.status
+    return _LEGACY_MARKERS.get(node.description, NodeStatus.OK)
+
+
+def _node_label(node: DependencyNode, *, show_desc: bool) -> Text:
+    """One rendered tree line: name, version, status marker, optional description."""
+    status = _status_of(node)
+    label = Text()
+    style = "bold" if status is NodeStatus.OK else "default"
+    label.append(node.name, style=style)
+    if node.version:
+        label.append(f" {node.version}", style="cyan")
+    if status is NodeStatus.TRUNCATED:
+        hidden = len(node.package_info.dependencies) if node.package_info else 0
+        label.append(f"  … {hidden} more" if hidden else "  … depth limit", style="dim")
+    elif status is not NodeStatus.OK:
+        glyph, text, colour = _STATUS_LABEL[status]
+        label.append(f"  {glyph} {text}", style=colour)
+    elif show_desc and node.description:
+        desc = node.description
+        if len(desc) > 70:
+            desc = desc[:69] + "…"
+        label.append(f"  {desc}", style="dim")
+    return label
+
+
+#: How many back-reference names to spell out before summarising the rest.
+_REPEAT_PREVIEW = 6
+
+
+def _repeat_summary(repeats: list[DependencyNode]) -> Text:
+    """One line standing in for several dependencies already shown further up."""
+    names = [n.name for n in repeats]
+    shown = names[:_REPEAT_PREVIEW]
+    line = Text("↩ ", style="dim")
+    line.append(f"{len(names)} already shown above: ", style="dim")
+    line.append(", ".join(shown), style="dim")
+    if len(names) > len(shown):
+        line.append(f", and {len(names) - len(shown)} more", style="dim")
+    return line
+
+
+def _print_tree_text(
+    node: DependencyNode,
+    indent: int = 0,
+    prefix: str = "",
+    *,
+    show_desc: bool = False,
+    expand_repeats: bool = False,
+    _is_root: bool = True,
+) -> None:
+    """Print a dependency tree using box-drawing characters."""
+    if _is_root:
+        # The package you asked about always gets its description.
+        _out.print(_node_label(node, show_desc=True))
+
+    children = list(node.children)
+    grouped: list[DependencyNode] = []
+    if not expand_repeats:
+        # Most lines of a real ROS tree are back-references to a package already
+        # printed further up. Collapsing sibling back-references onto one line
+        # keeps the novel structure visible instead of burying it.
+        repeats = [c for c in children if _status_of(c) is NodeStatus.REPEAT]
+        if len(repeats) > 1:
+            grouped = repeats
+            children = [c for c in children if _status_of(c) is not NodeStatus.REPEAT]
+
     for i, child in enumerate(children):
-        is_last = i == len(children) - 1
-        child_prefix = prefix + ("    " if is_last or not prefix else "│   ")
-        _print_tree_text(child, indent + 1, child_prefix if prefix else "")
+        last = i == len(children) - 1 and not grouped
+        connector = "└── " if last else "├── "
+        line = Text(prefix + connector, style="dim")
+        line.append_text(_node_label(child, show_desc=show_desc))
+        _out.print(line)
+        if child.children:
+            _print_tree_text(
+                child,
+                indent + 1,
+                prefix + ("    " if last else "│   "),
+                show_desc=show_desc,
+                expand_repeats=expand_repeats,
+                _is_root=False,
+            )
+
+    if grouped:
+        line = Text(prefix + "└── ", style="dim")
+        line.append_text(_repeat_summary(grouped))
+        _out.print(line)
+
+
+def _summary_line(stats: dict[str, int]) -> str:
+    parts = [
+        f"{stats['packages']} package(s)",
+        f"depth {stats['depth']}",
+        f"{stats['nodes']} line(s)",
+    ]
+    if stats["repeats"]:
+        parts.append(f"{stats['repeats']} repeat(s) collapsed")
+    if stats["cycles"]:
+        parts.append(f"{stats['cycles']} cycle(s)")
+    if stats["missing"]:
+        parts.append(f"{stats['missing']} unresolved")
+    return "  ·  ".join(parts)
+
+
+def _extra_roots(args: argparse.Namespace) -> list[Path] | None:
+    source = getattr(args, "source", None)
+    return [Path(p) for p in source] if source else None
+
+
+def _load_index(
+    args: argparse.Namespace,
+    *,
+    message: str = "Scanning packages",
+    roots: list[Path] | None = None,
+) -> PackageIndex:
+    """Build the package index once, with a spinner when attached to a terminal."""
+    if roots is None:
+        roots = _extra_roots(args)
+    if _err.is_terminal and not getattr(args, "json", False):
+        with _err.status(f"[dim]{message}…[/]", spinner="dots"):
+            return get_index(extra_source_roots=roots)
+    return get_index(extra_source_roots=roots)
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -47,7 +214,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         include_opt_ros=not args.no_system,
     )
 
-    if args.json:
+    if getattr(args, "json", False):
         print(json.dumps([ws.to_dict() for ws in workspaces], indent=2))
     else:
         if not workspaces:
@@ -66,7 +233,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             print(f"  {ws.path}")
             print(f"    Status: {status_str}")
             print(f"    Packages: {len(ws.packages)}")
-            if args.verbose and ws.packages:
+            if getattr(args, "verbose", False) and ws.packages:
                 for pkg in ws.packages[:20]:
                     print(f"      - {pkg}")
                 if len(ws.packages) > 20:
@@ -77,11 +244,20 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List known ROS 2 packages."""
-    extra_roots = [Path(p) for p in args.source] if args.source else None
+    extra_roots = _extra_roots(args)
+    pattern = getattr(args, "filter", None)
 
-    if args.by_source:
+    def matches(name: str) -> bool:
+        return pattern is None or pattern.lower() in name.lower()
+
+    if getattr(args, "by_source", False):
         by_source = list_packages_by_source(extra_source_roots=extra_roots)
-        if args.json:
+        by_source = {
+            label: [n for n in names if matches(n)]
+            for label, names in by_source.items()
+            if any(matches(n) for n in names)
+        }
+        if getattr(args, "json", False):
             print(json.dumps(by_source, indent=2))
         else:
             if not by_source:
@@ -91,7 +267,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"Found {total} package(s) from {len(by_source)} source(s):\n")
             for source, packages in by_source.items():
                 print(f"  {source} ({len(packages)})")
-                if args.verbose:
+                if getattr(args, "verbose", False):
                     for pkg in packages[:50]:
                         print(f"    - {pkg}")
                     if len(packages) > 50:
@@ -99,7 +275,8 @@ def cmd_list(args: argparse.Namespace) -> int:
                 print()
     else:
         packages = list_package_paths(extra_source_roots=extra_roots)
-        if args.json:
+        packages = {name: path for name, path in packages.items() if matches(name)}
+        if getattr(args, "json", False):
             print(json.dumps({name: str(path) for name, path in packages.items()}, indent=2))
         else:
             if not packages:
@@ -107,7 +284,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                 return 1
             print(f"Found {len(packages)} package(s):\n")
             for name in sorted(packages.keys()):
-                if args.verbose:
+                if getattr(args, "verbose", False):
                     print(f"  {name}: {packages[name]}")
                 else:
                     print(f"  {name}")
@@ -116,31 +293,277 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_tree(args: argparse.Namespace) -> int:
     """Show dependency tree for a package."""
-    extra_roots = [Path(p) for p in args.source] if args.source else None
+    index = _load_index(args)
+    if index.get(args.package) is None:
+        _err.print(f"[red]Package not found:[/] {args.package}")
+        _suggest(args.package, index)
+        return 1
 
+    full = getattr(args, "full", False)
     tree = build_dependency_tree(
         args.package,
-        max_depth=args.depth,
-        runtime_only=args.runtime,
-        extra_source_roots=extra_roots,
+        max_depth=getattr(args, "depth", None),
+        runtime_only=getattr(args, "runtime", False),
+        collapse_repeats=not full,
+        index=index,
+        max_nodes=getattr(args, "max_nodes", None),
     )
 
     if tree is None:
-        print(f"Package not found: {args.package}", file=sys.stderr)
+        _err.print(f"[red]Package not found:[/] {args.package}")
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(tree.to_dict(), indent=2))
+        return 0
+
+    _print_tree_text(
+        tree,
+        show_desc=getattr(args, "verbose", False),
+        expand_repeats=getattr(args, "expand_repeats", False) or full,
+    )
+    stats = tree_stats(tree)
+    _err.print(f"\n[dim]{_summary_line(stats)}[/]")
+    if stats["repeats"] and not full:
+        _err.print(
+            "[dim]Packages already shown above are summarised; "
+            "--expand-repeats lists them, --full re-expands their subtrees.[/]"
+        )
+    return 0
+
+
+def _suggest(name: str, index: PackageIndex, limit: int = 5) -> None:
+    """Print near-miss package names to soften a typo."""
+    import difflib
+
+    names = index.names()
+    close = difflib.get_close_matches(name, names, n=limit, cutoff=0.6)
+    if not close:
+        close = [n for n in names if name.lower() in n.lower()][:limit]
+    if close:
+        _err.print("[dim]Did you mean:[/] " + ", ".join(close))
+    elif not names:
+        _err.print("[dim]No packages are visible. Source your ROS 2 setup.bash first.[/]")
+
+
+def cmd_why(args: argparse.Namespace) -> int:
+    """Explain how one package ends up depending on another."""
+    index = _load_index(args)
+    for name in (args.package, args.dependency):
+        if index.get(name) is None and name != args.dependency:
+            _err.print(f"[red]Package not found:[/] {name}")
+            _suggest(name, index)
+            return 1
+
+    graph = build_dependency_graph(
+        args.package,
+        max_depth=args.depth,
+        runtime_only=args.runtime,
+        index=index,
+    )
+    paths = _shortest_paths(graph, args.package, args.dependency, limit=args.limit)
+
+    if not paths:
+        if args.json:
+            print(json.dumps({"from": args.package, "to": args.dependency, "paths": []}))
+        else:
+            _out.print(
+                f"[yellow]{args.package}[/] does not depend on [yellow]{args.dependency}[/]"
+                + (" (runtime dependencies only)" if args.runtime else "")
+            )
         return 1
 
     if args.json:
-        print(json.dumps(tree.to_dict(), indent=2))
-    else:
-        _print_tree_text(tree)
+        print(json.dumps({"from": args.package, "to": args.dependency, "paths": paths}, indent=2))
+        return 0
+
+    _out.print(
+        f"[bold]{args.package}[/] depends on [bold]{args.dependency}[/] "
+        f"via {len(paths)} shortest path(s) of length {len(paths[0]) - 1}:\n"
+    )
+    for path in paths:
+        line = Text("  ")
+        for i, name in enumerate(path):
+            if i:
+                line.append(" → ", style="dim")
+            line.append(name, style="bold" if i in (0, len(path) - 1) else "default")
+        _out.print(line)
     return 0
+
+
+def _shortest_paths(
+    graph: DependencyGraph,
+    start: str,
+    target: str,
+    *,
+    limit: int = 10,
+) -> list[list[str]]:
+    """All shortest dependency paths from start to target (breadth-first)."""
+    if start == target:
+        return [[start]]
+    from collections import deque
+
+    parents: dict[str, set[str]] = {}
+    depth: dict[str, int] = {start: 0}
+    queue: deque[str] = deque([start])
+    found_depth: int | None = None
+
+    while queue:
+        node = queue.popleft()
+        if found_depth is not None and depth[node] >= found_depth:
+            continue
+        for dep in graph.edges.get(node, ()):
+            if dep not in depth:
+                depth[dep] = depth[node] + 1
+                parents.setdefault(dep, set()).add(node)
+                if dep == target:
+                    found_depth = depth[dep]
+                else:
+                    queue.append(dep)
+            elif depth[dep] == depth[node] + 1:
+                parents.setdefault(dep, set()).add(node)
+
+    if target not in depth:
+        return []
+
+    paths: list[list[str]] = []
+
+    def walk_back(node: str, tail: list[str]) -> None:
+        if len(paths) >= limit:
+            return
+        if node == start:
+            paths.append([start] + tail)
+            return
+        for parent in sorted(parents.get(node, ())):
+            if depth.get(parent, -1) == depth[node] - 1:
+                walk_back(parent, [node] + tail)
+
+    walk_back(target, [])
+    return paths[:limit]
+
+
+def cmd_rdeps(args: argparse.Namespace) -> int:
+    """List packages that depend on the given package."""
+    index = _load_index(args, message="Indexing reverse dependencies")
+    if index.get(args.package) is None:
+        _err.print(f"[red]Package not found:[/] {args.package}")
+        _suggest(args.package, index)
+        return 1
+
+    tags = ("depend", "exec_depend") if args.runtime else None
+    if _err.is_terminal and not args.json:
+        with _err.status("[dim]Reading manifests…[/]", spinner="dots"):
+            reverse = index.reverse_dependencies(include_tags=tags)
+    else:
+        reverse = index.reverse_dependencies(include_tags=tags)
+
+    direct = sorted(reverse.get(args.package, ()))
+    if args.transitive:
+        seen: set[str] = set()
+        frontier = list(direct)
+        while frontier:
+            name = frontier.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            frontier.extend(reverse.get(name, ()))
+        names = sorted(seen)
+    else:
+        names = direct
+
+    if args.workspace_only:
+        names = [n for n in names if (e := index.get(n)) and e.kind is not SourceKind.SYSTEM]
+
+    if args.json:
+        print(json.dumps({"package": args.package, "dependents": names}, indent=2))
+        return 0
+
+    if not names:
+        _out.print(f"Nothing depends on [bold]{args.package}[/] in this environment.")
+        return 0
+
+    scope = "transitively" if args.transitive else "directly"
+    _out.print(f"[bold]{len(names)}[/] package(s) depend {scope} on [bold]{args.package}[/]:\n")
+    for name in names:
+        entry = index.get(name)
+        style = _SOURCE_STYLE.get(entry.kind, "default") if entry else "default"
+        line = Text("  ")
+        line.append(name, style=style)
+        if entry and args.verbose:
+            line.append(f"  {entry.kind.value}", style="dim")
+        _out.print(line)
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Report dependency cycles and unresolved dependencies. Non-zero exit on problems."""
+    index = _load_index(args)
+    if args.packages:
+        roots = list(args.packages)
+        unknown = [n for n in roots if index.get(n) is None]
+        if unknown:
+            _err.print("[red]Unknown package(s):[/] " + ", ".join(unknown))
+            return 2
+    else:
+        roots = index.workspace_names()
+        if not roots:
+            _err.print(
+                "[yellow]No workspace packages found.[/] Source a workspace, or name packages explicitly."
+            )
+            return 2
+
+    graph = build_dependency_graph(roots, runtime_only=args.runtime, index=index)
+    cycles = graph.cycles()
+    missing = sorted(graph.missing)
+    if args.ignore_system:
+        missing = [m for m in missing if "_" in m]
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "roots": roots,
+                    "packages": len(graph.packages),
+                    "cycles": cycles,
+                    "unresolved": missing,
+                },
+                indent=2,
+            )
+        )
+        return 1 if (cycles or missing) else 0
+
+    _out.print(f"Checked [bold]{len(graph.packages)}[/] package(s) from {len(roots)} root(s).\n")
+    if cycles:
+        _out.print(f"[red]✗ {len(cycles)} dependency cycle(s):[/]")
+        for cycle in cycles:
+            _out.print("    " + " → ".join(cycle))
+        _out.print("")
+    else:
+        _out.print("[green]✓[/] No dependency cycles.")
+
+    if missing:
+        _out.print(f"[yellow]! {len(missing)} unresolved dependency name(s):[/]")
+        for name in missing[:40]:
+            _out.print(f"    {name}", style="dim")
+        if len(missing) > 40:
+            _out.print(f"    … and {len(missing) - 40} more", style="dim")
+        _out.print(
+            "[dim]  Unresolved names are usually rosdep keys or packages that are not built yet.[/]"
+        )
+    else:
+        _out.print("[green]✓[/] Every dependency resolves to a package.")
+
+    return 1 if (cycles or missing) else 0
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
     """Launch the interactive TUI."""
     from rostree.tui.app import DepTreeApp
 
-    app = DepTreeApp(root_package=args.package if hasattr(args, "package") else None)
+    app = DepTreeApp(
+        root_package=getattr(args, "package", None),
+        runtime_only=not getattr(args, "all_deps", False),
+    )
     app.run()
     return 0
 
@@ -149,6 +572,8 @@ def _collect_edges(
     node: DependencyNode,
     edges: set[tuple[str, str]],
     visited: set[str] | None = None,
+    *,
+    include_missing: bool = False,
 ) -> None:
     """Recursively collect all edges (parent -> child) from a dependency tree."""
     if visited is None:
@@ -157,11 +582,13 @@ def _collect_edges(
         return
     visited.add(node.name)
     for child in node.children:
-        # Skip special markers
-        if child.description in ("(cycle)", "(not found)", "(parse error)"):
+        status = _status_of(child)
+        if status is NodeStatus.MISSING and not include_missing:
+            continue
+        if status in (NodeStatus.CYCLE, NodeStatus.PARSE_ERROR):
             continue
         edges.add((node.name, child.name))
-        _collect_edges(child, edges, visited)
+        _collect_edges(child, edges, visited, include_missing=include_missing)
 
 
 def _collect_edges_multi(
@@ -170,14 +597,13 @@ def _collect_edges_multi(
 ) -> tuple[set[tuple[str, str]], set[str]]:
     """Collect edges from multiple trees, tracking which nodes are roots."""
     edges: set[tuple[str, str]] = set()
-    all_nodes: set[str] = set()
+    all_nodes: set[str] = set(root_names)
     for tree in trees:
         _collect_edges(tree, edges)
         all_nodes.add(tree.name)
-        # Also collect all node names from edges
-        for parent, child in edges:
-            all_nodes.add(parent)
-            all_nodes.add(child)
+    for parent, child in edges:
+        all_nodes.add(parent)
+        all_nodes.add(child)
     return edges, all_nodes
 
 
@@ -187,30 +613,7 @@ def _generate_dot(
     highlight_roots: bool = True,
 ) -> str:
     """Generate DOT (Graphviz) format from dependency trees."""
-    root_names = {r.name for r in roots}
-    edges: set[tuple[str, str]] = set()
-    for root in roots:
-        _collect_edges(root, edges)
-
-    lines = [
-        "digraph dependencies {",
-        "    rankdir=LR;",
-        '    node [shape=box, style=rounded, fontname="sans-serif"];',
-    ]
-    if title:
-        lines.insert(1, f'    label="{title}";')
-        lines.insert(2, "    labelloc=t;")
-
-    # Highlight root nodes
-    if highlight_roots:
-        for name in sorted(root_names):
-            lines.append(f'    "{name}" [style="rounded,filled", fillcolor=lightblue];')
-
-    for parent, child in sorted(edges):
-        lines.append(f'    "{parent}" -> "{child}";')
-
-    lines.append("}")
-    return "\n".join(lines)
+    return to_dot(GraphView.from_trees(roots, title=title), highlight_roots=highlight_roots)
 
 
 def _generate_mermaid(
@@ -219,37 +622,12 @@ def _generate_mermaid(
     highlight_roots: bool = True,
 ) -> str:
     """Generate Mermaid format from dependency trees."""
-    root_names = {r.name for r in roots}
-    edges: set[tuple[str, str]] = set()
-    for root in roots:
-        _collect_edges(root, edges)
-
-    lines = ["graph LR"]
-    if title:
-        lines[0] = f"---\ntitle: {title}\n---\ngraph LR"
-
-    # Style root nodes
-    if highlight_roots:
-        for name in sorted(root_names):
-            lines.append(f"    {_mermaid_id(name)}[{name}]")
-            lines.append(f"    style {_mermaid_id(name)} fill:#lightblue")
-
-    for parent, child in sorted(edges):
-        lines.append(f"    {_mermaid_id(parent)} --> {_mermaid_id(child)}")
-
-    return "\n".join(lines)
-
-
-def _mermaid_id(name: str) -> str:
-    """Convert a package name to a valid Mermaid node ID."""
-    # Replace characters that are problematic in Mermaid
-    return name.replace("-", "_").replace(".", "_")
+    return to_mermaid(GraphView.from_trees(roots, title=title), highlight_roots=highlight_roots)
 
 
 def _get_workspace_packages(workspace_path: Path | None = None) -> list[str]:
     """Get packages from a workspace. If None, use current environment."""
     if workspace_path:
-        # Scan the specified workspace
         ws_path = Path(workspace_path).resolve()
         src_path = ws_path / "src" if (ws_path / "src").exists() else ws_path
         if not src_path.exists():
@@ -257,20 +635,13 @@ def _get_workspace_packages(workspace_path: Path | None = None) -> list[str]:
         from rostree.core.finder import _list_packages_in_src
 
         return _list_packages_in_src(src_path)
-    else:
-        # Use packages from current environment's workspace (not system)
-        by_source = list_packages_by_source()
-        packages = []
-        for label, names in by_source.items():
-            # Only include Workspace and Source packages, not System
-            if "System" not in label:
-                packages.extend(names)
-        return packages
-
-
-# Default depth limit for graph to prevent hangs
-GRAPH_DEFAULT_DEPTH = 4
-GRAPH_MAX_PACKAGES = 50
+    by_source = list_packages_by_source()
+    packages = []
+    for label, names in by_source.items():
+        # Only include Workspace and Source packages, not System
+        if "System" not in label:
+            packages.extend(names)
+    return packages
 
 
 def _check_graphviz() -> bool:
@@ -310,11 +681,8 @@ def _render_with_matplotlib(
         return False
 
     try:
-        # Create directed graph
         G = nx.DiGraph()
         G.add_edges_from(edges)
-
-        # Add isolated root nodes (roots with no deps)
         for root in root_names:
             if root not in G:
                 G.add_node(root)
@@ -323,50 +691,23 @@ def _render_with_matplotlib(
             print("Error: Graph is empty", file=sys.stderr)
             return False
 
-        # Create figure
         fig_width = max(12, len(G.nodes()) * 0.5)
         fig_height = max(8, len(G.nodes()) * 0.3)
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        # Layout - hierarchical for dependency graphs
         try:
-            # Try graphviz layout if available (best for DAGs)
             pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args="-Grankdir=LR")
         except Exception:
             try:
-                # Fall back to spring layout with more iterations
                 pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
             except Exception:
-                # Last resort: shell layout
                 pos = nx.shell_layout(G)
 
-        # Node colors: root nodes are highlighted
         node_colors = ["lightblue" if n in root_names else "lightgray" for n in G.nodes()]
-
-        # Draw the graph
-        nx.draw_networkx_nodes(
-            G,
-            pos,
-            node_color=node_colors,
-            node_size=2000,
-            alpha=0.9,
-            ax=ax,
-        )
-        nx.draw_networkx_labels(
-            G,
-            pos,
-            font_size=8,
-            font_weight="bold",
-            ax=ax,
-        )
+        nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=2000, alpha=0.9, ax=ax)
+        nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", ax=ax)
         nx.draw_networkx_edges(
-            G,
-            pos,
-            edge_color="gray",
-            arrows=True,
-            arrowsize=15,
-            alpha=0.7,
-            ax=ax,
+            G, pos, edge_color="gray", arrows=True, arrowsize=15, alpha=0.7, ax=ax
         )
 
         if title:
@@ -374,8 +715,6 @@ def _render_with_matplotlib(
 
         ax.axis("off")
         plt.tight_layout()
-
-        # Save to file
         plt.savefig(output_path, format=format, dpi=150, bbox_inches="tight")
         plt.close(fig)
         return True
@@ -403,7 +742,7 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
             input=dot_content,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
         )
         if result.returncode != 0:
             print(f"Graphviz error: {result.stderr}", file=sys.stderr)
@@ -419,8 +758,6 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
 
 def _open_file(path: Path) -> bool:
     """Open a file with the system default application."""
-    import platform
-
     system = platform.system()
     try:
         if system == "Darwin":  # macOS
@@ -437,21 +774,30 @@ def _open_file(path: Path) -> bool:
 
 def cmd_graph(args: argparse.Namespace) -> int:
     """Generate a dependency graph in DOT or Mermaid format."""
-    extra_roots = [Path(p) for p in args.source] if args.source else None
+    extra_roots = _extra_roots(args) or []
+    workspace = getattr(args, "workspace", None)
+    if workspace:
+        # -w names a workspace that may not be sourced at all, so make its packages
+        # resolvable instead of drawing a graph of names that resolve to nothing.
+        ws_path = Path(workspace).expanduser().resolve()
+        src = ws_path / "src" if (ws_path / "src").is_dir() else ws_path
+        if src.is_dir():
+            extra_roots = [*extra_roots, src]
+    index = _load_index(args, roots=extra_roots or None)
 
-    # Determine packages to graph
     packages_to_graph: list[str] = []
-
     if args.package:
         packages_to_graph = [args.package]
-    elif args.workspace:
-        # Scan specified workspace
+        if index.get(args.package) is None:
+            _err.print(f"[red]Package not found:[/] {args.package}")
+            _suggest(args.package, index)
+            return 1
+    elif getattr(args, "workspace", None):
         packages_to_graph = _get_workspace_packages(Path(args.workspace))
         if not packages_to_graph:
             print(f"No packages found in workspace: {args.workspace}", file=sys.stderr)
             return 1
     else:
-        # Use current environment's non-system packages
         packages_to_graph = _get_workspace_packages(None)
         if not packages_to_graph:
             print(
@@ -460,60 +806,66 @@ def cmd_graph(args: argparse.Namespace) -> int:
             )
             return 1
 
-    # Limit packages for performance
     if len(packages_to_graph) > GRAPH_MAX_PACKAGES and not args.package:
         print(
-            f"Warning: Limiting to first {GRAPH_MAX_PACKAGES} packages "
+            f"Warning: Limiting to first {GRAPH_MAX_PACKAGES} root packages "
             f"(found {len(packages_to_graph)}). Use -d to limit depth.",
             file=sys.stderr,
         )
         packages_to_graph = packages_to_graph[:GRAPH_MAX_PACKAGES]
 
-    # Use default depth for workspace graphs (prevent hangs), unlimited for single package
-    if args.depth is not None:
+    if getattr(args, "depth", None) is not None:
         depth = args.depth
     elif args.package:
-        depth = None  # Unlimited for single package
+        depth = None  # Unlimited for a single package
     else:
         depth = GRAPH_DEFAULT_DEPTH  # Limited for workspace-wide
 
-    # Build trees for all packages
-    trees: list[DependencyNode] = []
-    for i, pkg in enumerate(packages_to_graph):
-        if len(packages_to_graph) > 1:
-            print(f"Processing {pkg} ({i + 1}/{len(packages_to_graph)})...", file=sys.stderr)
-        tree = build_dependency_tree(
-            pkg,
+    # One breadth-first pass over the whole DAG, rather than one tree per package.
+    if _err.is_terminal:
+        with _err.status("[dim]Resolving dependencies…[/]", spinner="dots"):
+            graph = build_dependency_graph(
+                packages_to_graph,
+                max_depth=depth,
+                runtime_only=getattr(args, "runtime", False),
+                extra_source_roots=extra_roots,
+                index=index,
+            )
+    else:
+        graph = build_dependency_graph(
+            packages_to_graph,
             max_depth=depth,
-            runtime_only=args.runtime,
+            runtime_only=getattr(args, "runtime", False),
             extra_source_roots=extra_roots,
+            index=index,
         )
-        if tree is not None:
-            trees.append(tree)
 
-    if not trees:
+    if not graph.edges:
         print("No valid package trees found.", file=sys.stderr)
         return 1
 
-    # Generate title
-    if args.no_title:
+    if getattr(args, "no_title", False):
         title = None
     elif args.package:
         title = f"{args.package} dependencies"
-    elif args.workspace:
+    elif getattr(args, "workspace", None):
         title = f"Workspace: {Path(args.workspace).name}"
     else:
         title = "Workspace dependencies"
 
-    if args.format == "mermaid":
-        output = _generate_mermaid(trees, title=title)
-    else:  # dot
-        output = _generate_dot(trees, title=title)
+    show_missing = not getattr(args, "hide_missing", False)
+    view = GraphView.from_graph(graph, title=title, show_missing=show_missing)
+    if graph.missing and show_missing:
+        _err.print(
+            f"[dim]{len(graph.missing)} dependency name(s) did not resolve; "
+            "drawn dashed. Use --hide-missing to omit them.[/]"
+        )
 
-    # Handle rendering to image
+    output = to_mermaid(view) if getattr(args, "format", "dot") == "mermaid" else to_dot(view)
+
     render_format = getattr(args, "render", None)
     if render_format:
-        if args.format == "mermaid":
+        if getattr(args, "format", "dot") == "mermaid":
             print(
                 "Error: --render only works with DOT format (not mermaid). "
                 "Remove -f mermaid or use mermaid.live for rendering.",
@@ -521,69 +873,76 @@ def cmd_graph(args: argparse.Namespace) -> int:
             )
             return 1
 
-        # Determine output path
-        if args.output:
-            # If output specified, use it with proper extension
+        if getattr(args, "output", None):
             out_path = Path(args.output)
             if out_path.suffix.lower() not in (f".{render_format}", ".dot"):
                 out_path = out_path.with_suffix(f".{render_format}")
         else:
-            # Default filename based on package or workspace
             if args.package:
                 base_name = args.package.replace("/", "_")
-            elif args.workspace:
+            elif getattr(args, "workspace", None):
                 base_name = Path(args.workspace).name
             else:
                 base_name = "workspace_deps"
             out_path = Path(f"{base_name}.{render_format}")
 
-        print(f"Rendering graph to {out_path}...", file=sys.stderr)
+        print(
+            f"Rendering {len(view.nodes)} nodes / {len(view.edges)} edges to {out_path}...",
+            file=sys.stderr,
+        )
 
-        # Try Graphviz first (best quality), fall back to matplotlib
         rendered = False
         if _check_graphviz():
             rendered = _render_dot(output, out_path, render_format)
+        elif _check_matplotlib():
+            print("Graphviz not found, using matplotlib...", file=sys.stderr)
+            rendered = _render_with_matplotlib(
+                view.edges, view.roots, out_path, render_format, title
+            )
         else:
-            # Collect edges for matplotlib rendering
-            root_names = {t.name for t in trees}
-            edges: set[tuple[str, str]] = set()
-            for tree in trees:
-                _collect_edges(tree, edges)
-
-            if _check_matplotlib():
-                print("Graphviz not found, using matplotlib...", file=sys.stderr)
-                rendered = _render_with_matplotlib(
-                    edges, root_names, out_path, render_format, title
-                )
-            else:
-                print(
-                    "Error: No rendering backend available.\n"
-                    "Install one of:\n"
-                    "  1. Graphviz (system): sudo apt install graphviz\n"
-                    "  2. matplotlib (pip): pip install rostree[viz]",
-                    file=sys.stderr,
-                )
-                return 1
+            print(
+                "Error: No rendering backend available.\n"
+                "Install one of:\n"
+                "  1. Graphviz (system): sudo apt install graphviz\n"
+                "  2. matplotlib (pip): pip install rostree[viz]",
+                file=sys.stderr,
+            )
+            return 1
 
         if not rendered:
             return 1
 
         print(f"Graph image saved to: {out_path}", file=sys.stderr)
-
-        # Open the file if requested
         if getattr(args, "open", False):
             _open_file(out_path)
-
         return 0
 
-    # Just output text (DOT or Mermaid)
-    if args.output:
+    if getattr(args, "output", None):
         Path(args.output).write_text(output)
         print(f"Graph written to: {args.output}", file=sys.stderr)
     else:
         print(output)
 
     return 0
+
+
+def _add_source_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-s",
+        "--source",
+        action="append",
+        metavar="PATH",
+        help="Additional source directories to scan (can be repeated)",
+    )
+
+
+def _add_runtime_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-r",
+        "--runtime",
+        action="store_true",
+        help="Only follow runtime dependencies (depend, exec_depend)",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -595,6 +954,7 @@ def main(argv: list[str] | None = None) -> int:
     from rostree import __version__
 
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--no-color", action="store_true", help="Disable coloured output")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -610,33 +970,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Directories to scan (default: common locations like ~/ros*_ws, /opt/ros/*)",
     )
     scan_parser.add_argument(
-        "-d",
-        "--depth",
-        type=int,
-        default=4,
-        help="Maximum recursion depth (default: 4)",
+        "-d", "--depth", type=int, default=4, help="Maximum recursion depth (default: 4)"
     )
     scan_parser.add_argument(
-        "--no-home",
-        action="store_true",
-        help="Don't scan home directory locations",
+        "--no-home", action="store_true", help="Don't scan home directory locations"
     )
     scan_parser.add_argument(
-        "--no-system",
-        action="store_true",
-        help="Don't scan /opt/ros system installs",
+        "--no-system", action="store_true", help="Don't scan /opt/ros system installs"
     )
     scan_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show packages in each workspace",
+        "-v", "--verbose", action="store_true", help="Show packages in each workspace"
     )
-    scan_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON",
-    )
+    scan_parser.add_argument("--json", action="store_true", help="Output as JSON")
     scan_parser.set_defaults(func=cmd_scan)
 
     # rostree list
@@ -645,67 +990,124 @@ def main(argv: list[str] | None = None) -> int:
         help="List known ROS 2 packages",
         description="List packages visible in the current ROS 2 environment.",
     )
+    _add_source_arg(list_parser)
     list_parser.add_argument(
-        "-s",
-        "--source",
-        action="append",
-        metavar="PATH",
-        help="Additional source directories to scan (can be repeated)",
+        "--by-source", action="store_true", help="Group packages by source (System, Workspace, ...)"
     )
     list_parser.add_argument(
-        "--by-source",
-        action="store_true",
-        help="Group packages by source (System, Workspace, etc.)",
+        "-f", "--filter", metavar="TEXT", help="Only show packages whose name contains TEXT"
     )
-    list_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show package paths",
-    )
-    list_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON",
-    )
+    list_parser.add_argument("-v", "--verbose", action="store_true", help="Show package paths")
+    list_parser.add_argument("--json", action="store_true", help="Output as JSON")
     list_parser.set_defaults(func=cmd_list)
 
     # rostree tree
     tree_parser = subparsers.add_parser(
         "tree",
         help="Show dependency tree for a package",
-        description="Build and display the dependency tree for a ROS 2 package.",
+        description=(
+            "Build and display the dependency tree for a ROS 2 package. "
+            "A package that appears more than once is expanded where it first "
+            "appears and marked '↩ see above' elsewhere; use --full to expand every "
+            "occurrence."
+        ),
+    )
+    tree_parser.add_argument("package", help="Package name to show dependencies for")
+    tree_parser.add_argument(
+        "-d", "--depth", type=int, default=None, help="Maximum tree depth (default: unlimited)"
+    )
+    _add_runtime_arg(tree_parser)
+    _add_source_arg(tree_parser)
+    tree_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Expand repeated subtrees instead of collapsing them (can be very large)",
     )
     tree_parser.add_argument(
-        "package",
-        help="Package name to show dependencies for",
+        "--expand-repeats",
+        action="store_true",
+        help="List back-references on their own lines instead of summarising them",
     )
     tree_parser.add_argument(
-        "-d",
-        "--depth",
+        "--max-nodes",
         type=int,
         default=None,
-        help="Maximum tree depth (default: unlimited)",
+        metavar="N",
+        help="Stop after N nodes (safety valve, mostly useful with --full)",
     )
     tree_parser.add_argument(
-        "-r",
-        "--runtime",
-        action="store_true",
-        help="Show only runtime dependencies (depend, exec_depend)",
+        "-v", "--verbose", action="store_true", help="Show package descriptions"
     )
-    tree_parser.add_argument(
-        "-s",
-        "--source",
-        action="append",
-        metavar="PATH",
-        help="Additional source directories to scan (can be repeated)",
-    )
-    tree_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON",
-    )
+    tree_parser.add_argument("--json", action="store_true", help="Output as JSON")
     tree_parser.set_defaults(func=cmd_tree)
+
+    # rostree why
+    why_parser = subparsers.add_parser(
+        "why",
+        help="Explain why a package depends on another",
+        description="Show the shortest dependency paths from one package to another.",
+    )
+    why_parser.add_argument("package", help="Package to start from")
+    why_parser.add_argument("dependency", help="Dependency to explain")
+    why_parser.add_argument(
+        "-d", "--depth", type=int, default=None, help="Maximum search depth (default: unlimited)"
+    )
+    why_parser.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Show at most N paths (default: 10)",
+    )
+    _add_runtime_arg(why_parser)
+    _add_source_arg(why_parser)
+    why_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    why_parser.set_defaults(func=cmd_why)
+
+    # rostree rdeps
+    rdeps_parser = subparsers.add_parser(
+        "rdeps",
+        help="List packages that depend on a package",
+        description="Reverse dependency lookup: what would break if this package changed?",
+    )
+    rdeps_parser.add_argument("package", help="Package to look up")
+    rdeps_parser.add_argument(
+        "-t", "--transitive", action="store_true", help="Include indirect dependents"
+    )
+    rdeps_parser.add_argument(
+        "-w",
+        "--workspace-only",
+        action="store_true",
+        help="Exclude packages installed under /opt/ros",
+    )
+    _add_runtime_arg(rdeps_parser)
+    _add_source_arg(rdeps_parser)
+    rdeps_parser.add_argument("-v", "--verbose", action="store_true", help="Show package source")
+    rdeps_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    rdeps_parser.set_defaults(func=cmd_rdeps)
+
+    # rostree check
+    check_parser = subparsers.add_parser(
+        "check",
+        help="Check for dependency cycles and unresolved dependencies",
+        description=(
+            "Report dependency cycles and dependencies that resolve to nothing. "
+            "Exits non-zero when problems are found, so it can gate CI."
+        ),
+    )
+    check_parser.add_argument(
+        "packages", nargs="*", help="Packages to check (default: every workspace package)"
+    )
+    check_parser.add_argument(
+        "--ignore-system",
+        action="store_true",
+        help="Ignore unresolved names that look like rosdep keys",
+    )
+    _add_runtime_arg(check_parser)
+    _add_source_arg(check_parser)
+    check_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    check_parser.set_defaults(func=cmd_check)
 
     # rostree graph
     graph_parser = subparsers.add_parser(
@@ -718,15 +1120,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     graph_parser.add_argument(
-        "package",
-        nargs="?",
-        help="Package name to graph (optional; without it, graphs workspace)",
+        "package", nargs="?", help="Package name to graph (optional; without it, graphs workspace)"
     )
     graph_parser.add_argument(
-        "-w",
-        "--workspace",
-        metavar="PATH",
-        help="Scan and graph packages from this workspace path",
+        "-w", "--workspace", metavar="PATH", help="Scan and graph packages from this workspace path"
     )
     graph_parser.add_argument(
         "-f",
@@ -736,36 +1133,26 @@ def main(argv: list[str] | None = None) -> int:
         help="Output format: dot (Graphviz) or mermaid (default: dot)",
     )
     graph_parser.add_argument(
-        "-o",
-        "--output",
-        metavar="FILE",
-        help="Output file (default: stdout)",
+        "-o", "--output", metavar="FILE", help="Output file (default: stdout)"
     )
     graph_parser.add_argument(
         "-d",
         "--depth",
         type=int,
         default=None,
-        help=f"Maximum tree depth (default: {GRAPH_DEFAULT_DEPTH} for workspace, unlimited for single package)",
+        help=(
+            f"Maximum tree depth (default: {GRAPH_DEFAULT_DEPTH} for workspace, "
+            "unlimited for single package)"
+        ),
     )
+    _add_runtime_arg(graph_parser)
+    _add_source_arg(graph_parser)
     graph_parser.add_argument(
-        "-r",
-        "--runtime",
+        "--hide-missing",
         action="store_true",
-        help="Show only runtime dependencies (depend, exec_depend)",
+        help="Omit dependencies that do not resolve (they are drawn dashed by default)",
     )
-    graph_parser.add_argument(
-        "-s",
-        "--source",
-        action="append",
-        metavar="PATH",
-        help="Additional source directories to scan (can be repeated)",
-    )
-    graph_parser.add_argument(
-        "--no-title",
-        action="store_true",
-        help="Don't include a title in the graph",
-    )
+    graph_parser.add_argument("--no-title", action="store_true", help="Don't include a title")
     graph_parser.add_argument(
         "--render",
         choices=["png", "svg", "pdf"],
@@ -773,9 +1160,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Render to image (png, svg, pdf). Requires Graphviz installed.",
     )
     graph_parser.add_argument(
-        "--open",
-        action="store_true",
-        help="Open the rendered image after creation (use with --render)",
+        "--open", action="store_true", help="Open the rendered image after creation"
     )
     graph_parser.set_defaults(func=cmd_graph)
 
@@ -785,14 +1170,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Launch the interactive terminal UI",
         description="Start the interactive TUI for browsing packages and dependencies.",
     )
+    tui_parser.add_argument("package", nargs="?", help="Optional: start with this package's tree")
     tui_parser.add_argument(
-        "package",
-        nargs="?",
-        help="Optional: start with this package's tree",
+        "--all-deps",
+        action="store_true",
+        help="Follow build and test dependencies too (default: runtime only)",
     )
     tui_parser.set_defaults(func=cmd_tui)
 
     args = parser.parse_args(argv)
+    _configure_console(args)
 
     # Default to TUI if no command specified
     if args.command is None:
