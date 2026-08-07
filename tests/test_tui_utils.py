@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from rostree.tui.app import (
     _count_nodes,
     _node_stats,

@@ -4,17 +4,35 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 
 ---
 
-## Phase 1: Critical Fixes (v0.3.0)
+## Phase 1: Critical Fixes (v0.3.0) — shipped
 
-**Goal:** Make the graph visualization actually work for real workspaces.
+**Goal:** Make the graph visualization actually work for real workspaces, and make
+large trees usable.
+
+Delivered in v0.3.0. The headline change was not on this list: dependency tree
+building was **exponential** because a DAG was expanded once per path. Each package
+is now expanded once, where it first appears (see
+[dependency-trees.md](dependency-trees.md#repeats-why-trees-stay-small)), which took
+an unlimited-depth tree from "never finishes" to 0.03 s.
+
+Caching was implemented as a one-pass `PackageIndex` (`core/index.py`) rather than a
+per-call cache with a TTL: discovery happens once per run, and the index is cached
+per process and per environment with an explicit `refresh=True`. Disk persistence
+was not needed once a full scan cost milliseconds.
 
 ### 1.1 Fix Graph Edge Collection
-- [ ] Add option to include edges to "(not found)" packages
-- [ ] Add `--show-missing` flag to graph command
-- [ ] Style missing packages differently (dashed lines, gray nodes)
-- [ ] Default behavior: show edges to missing packages in workspace graphs
+- [x] Add option to include edges to "(not found)" packages
+- [x] Add `--show-missing` flag to graph command
+- [x] Style missing packages differently (dashed lines, gray nodes)
+- [x] Default behavior: show edges to missing packages in workspace graphs
 
 ### 1.2 Implement ros2 pkg Fallback Properly
+
+Not done, and no longer clearly worth doing: with the index scanning every prefix
+and source root, the packages `ros2 pkg xml` could find are already found, and
+shelling out per package would be far slower. Unresolved names are now surfaced
+honestly (`✗ not found`, dashed graph nodes, `rostree check`) instead of hidden.
+
 - [ ] Add `parse_package_xml_string()` to parser.py
 - [ ] Add `_try_ros2_pkg_xml()` helper to tree.py
 - [ ] Add `_try_ros2_pkg_prefix()` helper to tree.py
@@ -23,16 +41,17 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 - [ ] Document fallback behavior
 
 ### 1.3 Add Package Discovery Caching
-- [ ] Create `PackageCache` class with TTL
-- [ ] Cache `find_package_path()` results
-- [ ] Cache `parse_package_xml()` results
+- [x] Create `PackageCache` class with TTL — shipped as `PackageIndex`, cached per
+  process and per environment with explicit `refresh=True` instead of a TTL
+- [x] Cache `find_package_path()` results
+- [x] Cache `parse_package_xml()` results
 - [ ] Add `--no-cache` flag for fresh scans
 - [ ] Persist cache to disk (optional)
 
 ### 1.4 Fix Performance Issues
-- [ ] Fix O(n²) visited set copying in `build_dependency_tree()`
-- [ ] Deduplicate XML name parsing into single helper
-- [ ] Add progress callback for long operations
+- [x] Fix O(n²) visited set copying in `build_dependency_tree()`
+- [x] Deduplicate XML name parsing into single helper
+- [x] Add progress callback for long operations
 
 ---
 
@@ -41,19 +60,19 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 **Goal:** Make the codebase maintainable and testable.
 
 ### 2.1 Refactor Status Markers
-- [ ] Create `NodeStatus` enum
+- [x] Create `NodeStatus` enum
 - [ ] Create `ErrorNode` dataclass (or use discriminated union)
-- [ ] Update all status string checks to use enum
-- [ ] Add `is_error` property to `DependencyNode`
+- [x] Update all status string checks to use enum
+- [x] Add `is_error` property to `DependencyNode`
 
 ### 2.2 Split CLI Module
 - [ ] Extract `cli/commands/scan.py`
 - [ ] Extract `cli/commands/list.py`
 - [ ] Extract `cli/commands/tree.py`
 - [ ] Extract `cli/commands/graph.py`
-- [ ] Extract `graph/dot.py`
-- [ ] Extract `graph/mermaid.py`
-- [ ] Extract `graph/render.py`
+- [x] Extract `graph/dot.py` — as `core/graph.py::to_dot`
+- [x] Extract `graph/mermaid.py` — as `core/graph.py::to_mermaid`
+- [ ] Extract `graph/render.py` — image rendering is I/O and stayed in `cli.py`
 - [ ] Keep `cli/__init__.py` as entry point
 
 ### 2.3 Improve Error Handling
@@ -75,10 +94,10 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 **Goal:** Add commonly requested features.
 
 ### 3.1 Reverse Dependency Lookup
-- [ ] Add `rostree rdeps <package>` command
-- [ ] Build reverse dependency index
-- [ ] Show "what depends on X" tree
-- [ ] Add to TUI as separate view
+- [x] Add `rostree rdeps <package>` command
+- [x] Build reverse dependency index
+- [x] Show "what depends on X" tree
+- [x] Add to TUI as separate view
 
 ### 3.2 Filtering Options
 - [ ] Add `--filter-type` (runtime/build/test/all)
@@ -93,7 +112,7 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 - [ ] CLI args override config file
 
 ### 3.4 Export Formats
-- [ ] Add `--format json` for structured output
+- [x] Add `--format json` for structured output
 - [ ] Add `--format csv` for spreadsheet import
 - [ ] Add SBOM export (CycloneDX format)
 - [ ] Add requirements.txt generation
@@ -117,9 +136,9 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 - [ ] Export filtered views
 
 ### 4.3 CI/CD Integration
-- [ ] Add `rostree check` command for CI
-- [ ] Detect circular dependencies
-- [ ] Detect missing dependencies
+- [x] Add `rostree check` command for CI
+- [x] Detect circular dependencies
+- [x] Detect missing dependencies
 - [ ] Output JUnit XML for test frameworks
 - [ ] GitHub Action for automated checks
 
@@ -136,11 +155,11 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 **Goal:** Production-ready with comprehensive documentation.
 
 ### 5.1 Documentation Overhaul
+- [x] Add video tutorials — a promo/demo cast lives in `docs/media/`
 - [ ] Add architecture documentation
 - [ ] Add API reference with examples
 - [ ] Add troubleshooting guide
 - [ ] Add contribution guidelines
-- [ ] Add video tutorials
 
 ### 5.2 Integration Tests
 - [ ] Add tests against real ROS 2 packages
@@ -166,7 +185,7 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 
 | Version | Target | Key Deliverables |
 |---------|--------|------------------|
-| 0.3.0 | Q1 2026 | Working graph visualization, ros2 fallback |
+| 0.3.0 | ✅ shipped | Linear tree building, package index, graphs keep missing edges, `why`/`rdeps`/`check` |
 | 0.4.0 | Q2 2026 | Refactored codebase, better errors |
 | 0.5.0 | Q2 2026 | Reverse deps, filtering, config files |
 | 0.6.0 | Q3 2026 | Diff, interactive graph, CI integration |
@@ -178,13 +197,14 @@ Based on the [code review](./review.md), this roadmap prioritizes fixes and feat
 
 These are low-effort improvements that can be merged opportunistically:
 
-- [ ] Add `NodeStatus` enum (1 hour)
-- [ ] Deduplicate XML name parsing (2 hours)
-- [ ] Fix visited set copying (30 minutes)
-- [ ] Add type hints to TUI helpers (1 hour)
+- [x] Add `NodeStatus` enum (1 hour)
+- [x] Deduplicate XML name parsing (2 hours)
+- [x] Fix visited set copying (30 minutes)
+- [x] Add type hints to TUI helpers (1 hour)
 - [ ] Add docstrings to test methods (2 hours)
 - [ ] Add `--quiet` flag to suppress progress output (30 minutes)
-- [ ] Allow TUI limits to be overridden via env vars (1 hour)
+- [x] Allow TUI limits to be overridden via env vars — obsolete: the 80-per-source
+  and 500-node caps were removed rather than made configurable
 
 ---
 

@@ -7,16 +7,15 @@ import re
 from pathlib import Path
 from unittest import mock
 
-
+import rostree
 from rostree.api import (
+    build_tree,
+    get_package_info,
     list_known_packages,
     list_known_packages_by_source,
-    get_package_info,
-    build_tree,
     scan_workspaces,
 )
 from rostree.core.finder import WorkspaceInfo
-import rostree
 
 
 class TestModuleExports:

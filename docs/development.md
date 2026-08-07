@@ -3,14 +3,19 @@
 ## Layout
 
 ```
-rosdep_viz/
+rostree/
 ├── docs/                 # Documentation (this folder)
-├── src/rosdep_viz/       # Main package
-│   ├── core/             # finder, parser, tree
+├── src/rostree/          # Main package
+│   ├── core/
+│   │   ├── index.py      # One-pass cached package index
+│   │   ├── finder.py     # Workspace scanning + name lookups
+│   │   ├── parser.py     # package.xml parsing (memoized)
+│   │   ├── tree.py       # DependencyGraph + DependencyNode
+│   │   └── graph.py      # DOT / Mermaid generation
 │   ├── api.py            # Public API
+│   ├── cli.py            # Command line interface
 │   └── tui/              # Textual TUI
-├── tests/                # pytest
-├── rosdep_viz_webapp/     # Web app (backend + frontend)
+├── tests/                # pytest (incl. TUI pilot tests)
 ├── pyproject.toml
 ├── .pre-commit-config.yaml
 └── .github/workflows/    # CI and publish
@@ -36,33 +41,38 @@ pre-commit install
 pre-commit install --hook-type commit-msg
 ```
 
-- **Ruff** — Lint and fix (src, tests, rosdep_viz_webapp/backend).
+- **Ruff** — Lint and fix (src, tests). The enabled rule set is pinned in
+  `[tool.ruff.lint]` and the version is pinned in the `dev` extra, so a new ruff
+  release cannot silently change what CI enforces.
 - **Black** — Format (line-length 100).
 - **conventional-pre-commit** — Commit message prefix check (commit-msg hook).
 
 ## CI
 
-- **ci-library.yml** — Python 3.10–3.12, pip install, ruff, black, pytest.
-- **ci-backend.yml** — Install library + backend[dev], pytest (backend tests).
-- **ci-frontend.yml** — Node 22, npm install, lint, build.
+- **ci.yml** — lint (ruff, black) plus pytest with coverage on Python 3.10–3.12.
 - **publish.yml** — Build and publish to PyPI on release (Trusted Publishing).
 
-No path filters: CI runs on every push/PR to main/master.
+CI runs on every push/PR to main/master.
 
 ## Tests
 
 ```bash
 pytest tests -v
-# From backend: cd rosdep_viz_webapp/backend && pytest tests -v
 ```
+
+TUI behaviour is covered by `tests/test_tui_app.py`, which drives the real app
+through Textual's pilot harness (key presses, background workers, lazy expansion)
+rather than testing helpers in isolation. `tests/conftest.py` clears the package
+index and parse caches between tests — they are process-wide by design, so tests
+must not share them.
 
 ## Docs
 
 - **docs/README.md** — Index of all docs.
 - **docs/overview.md** — System overview and data flow.
 - **docs/package-discovery.md** — How packages are found (env vars, workspaces).
-- **docs/dependency-trees.md** — package.xml parsing, tree building, runtime_only.
-- **docs/usage.md** — TUI, API, webapp.
+- **docs/dependency-trees.md** — parsing, the package index, repeat collapsing, graphs.
+- **docs/usage.md** — CLI, TUI keys, Python API.
 - **docs/development.md** — This file.
 
 Keep the root **README.md** lean; link to these docs for details.

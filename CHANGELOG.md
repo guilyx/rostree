@@ -7,6 +7,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-07
+
+Large trees used to take tens of seconds — or never finish. This release makes
+them near-instant and reworks the interface around them.
+
+### Performance
+
+- **Dependency trees are linear, not exponential.** A ROS dependency graph is a
+  DAG: `rcutils` sits under nearly every branch. Expanding every path separately
+  produced tens of thousands of duplicate nodes. Each package is now expanded once,
+  where it first appears, and marked `↩ see above` elsewhere — the same convention
+  `cargo tree` uses. Measured on a 135-package install space plus a 24-package
+  source workspace, resolving `nav2_bringup` with `-r`:
+
+  | depth | before | after |
+  |-------|--------|-------|
+  | 5 | 4,152 nodes / 1.02 s | 475 nodes / 0.02 s |
+  | 6 | 18,273 nodes / 4.44 s | 548 nodes / 0.02 s |
+  | 7 | 68,081 nodes / 17.41 s | 552 nodes / 0.02 s |
+  | unlimited (the CLI default) | did not finish in 4 minutes | 552 nodes / 0.02 s |
+
+  Pass `--full` to `rostree tree` for the old fully-expanded behaviour.
+- **Package discovery happens once.** New `rostree.core.index.PackageIndex` scans
+  every install prefix and source tree a single time and resolves names from memory.
+  Previously every node of a tree could trigger a fresh recursive `os.walk`.
+- **package.xml parsing is memoized** by path, mtime and size.
+- **Source scans prune** `build/`, `install/`, `log/`, VCS metadata and directories
+  marked `COLCON_IGNORE`/`AMENT_IGNORE`, and stop descending once a manifest is found.
+- `rostree graph` resolves the whole DAG in one breadth-first pass instead of
+  building a separate full tree per package.
+
+### Added
+
+- **`rostree why <package> <dependency>`** — shortest dependency paths between two
+  packages, answering "why is this in my tree at all?".
+- **`rostree rdeps <package>`** — reverse dependency lookup, with `--transitive`
+  and `--workspace-only`.
+- **`rostree check`** — reports dependency cycles and unresolved dependencies and
+  exits non-zero, so it can gate CI.
+- `rostree list --filter TEXT` to narrow the package list.
+- `rostree tree --full`, `--expand-repeats`, `--max-nodes` and `-v` for descriptions.
+- `--no-color` on all commands (`NO_COLOR` is honoured too).
+- `NodeStatus` enum on `DependencyNode` (`ok`, `repeat`, `cycle`, `missing`,
+  `parse_error`, `truncated`) plus `is_error`/`is_placeholder`, replacing string
+  markers stuffed into `description`. `to_dict()` now includes `status`.
+- Public API: `build_graph()`, `reverse_dependencies()`, `get_index()`, `tree_stats()`.
+- TUI: live filter over every package, reverse-dependency view (`v`), dependency
+  scope toggle (`t`), and a help screen (`?`).
+
+### Fixed
+
+- **Graphs no longer drop edges to unresolved packages.** Dependencies without a
+  manifest are drawn dashed and grey instead of being silently removed, which used
+  to leave workspace graphs as a field of unconnected boxes. `--hide-missing`
+  restores the old behaviour.
+- **`rostree graph -w PATH` now works on a workspace that is not sourced** — the
+  workspace's own packages are added to the search path.
+- **Unbuilt packages in a sourced workspace are found again.** The source root was
+  derived as `<ws>/install/src` instead of `<ws>/src`, so `src`-only packages were
+  invisible whenever the workspace was discovered through `AMENT_PREFIX_PATH` or
+  `COLCON_PREFIX_PATH`. Both the merged (`<ws>/install`) and isolated
+  (`<ws>/install/<pkg>`) colcon layouts are now handled.
+- **Packages named `lib*` are no longer discarded.** `libstatistics_collector` and
+  `libyaml_vendor` are real ROS 2 packages; only dashed rosdep keys
+  (`libboost-dev`, `python3-numpy`) are treated as system dependencies, and those
+  are now kept on `PackageInfo.system_dependencies` rather than dropped.
+- **The TUI no longer freezes** while a tree is built: resolution runs on a worker
+  thread and rows are created only as nodes are expanded.
+- The TUI package list is no longer capped at 80 entries per source.
+- Text trees use correct box-drawing characters (`└──` for last children, proper
+  vertical guides); previously every child was drawn as `├──`.
+- An unknown package name is now an error with suggestions and a non-zero exit,
+  instead of a one-node tree and exit 0.
+- The five duplicated hand-rolled `<name>` XML scrapers were replaced by a single
+  `quick_package_name()` helper.
+- Worker results in the TUI are routed to the callback that asked for them, rather
+  than to whichever handler saw the completion event first.
+- **`↩ see above` now always refers to something printed earlier.** Expansion was
+  chosen by shortest distance from the root while the tree renders depth-first, so
+  a back-reference could point at a subtree printed *below* it. Each package is now
+  expanded where the tree first prints it, which also removes a whole breadth-first
+  pass from tree building.
+- Reverse dependencies were cached without keying on the dependency tag set, so a
+  runtime-only lookup and a full lookup returned whichever ran first.
+- `rostree why <pkg> <pkg>` reported a dependency path for a package that does not
+  exist; the validation loop skipped both arguments when they were equal.
+- Global flags such as `--no-color` are accepted after the subcommand too
+  (`rostree tree rclcpp --no-color` used to be a usage error).
+- TUI: pressing `e` (expand all) or running a search no longer duplicates every
+  row of an already-expanded tree.
+- TUI: selecting a second package while a tree is still building no longer leaves
+  the app pointing at a tree it never rendered.
+- TUI: adding a source path while a tree is open now rescans, instead of leaving
+  the new packages invisible.
+- TUI: `Esc` leaves the dependents view when it was opened from the package list.
+- `--open` no longer goes through a shell on Windows: it uses `os.startfile`, so a
+  path containing shell metacharacters cannot be misinterpreted. External tools
+  (`dot`, `open`, `xdg-open`) are resolved to absolute paths before being executed.
+
+### Changed
+
+- `rostree tree` groups sibling back-references onto one line
+  (`↩ 5 already shown above: …`); `--expand-repeats` lists them individually.
+- Depth-limited nodes report how many dependencies are hidden (`… 5 more`).
+- `rich` is now a direct dependency (it was already installed via `textual`).
+- Lint rules are pinned in `pyproject.toml` so a new ruff release cannot change
+  what CI enforces.
+
 ## [0.2.2] - 2026-02-05
 
 ### Added
@@ -96,7 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.10+
 - textual >= 0.47.0
 
-[Unreleased]: https://github.com/guilyx/rostree/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/guilyx/rostree/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/guilyx/rostree/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/guilyx/rostree/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/guilyx/rostree/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/guilyx/rostree/compare/v0.1.0...v0.2.0

@@ -6,21 +6,20 @@ import os
 from pathlib import Path
 from unittest import mock
 
-
 from rostree.core.finder import (
     WorkspaceInfo,
-    scan_for_workspaces,
-    find_package_path,
-    list_package_paths,
-    list_packages_by_source,
     _env_paths,
     _find_package_xml_in_prefix,
     _find_package_xml_in_src,
     _gather_workspace_src_roots,
     _is_system_prefix,
-    _workspace_root_from_prefix,
-    _list_packages_in_src,
     _list_packages_in_install,
+    _list_packages_in_src,
+    _workspace_root_from_prefix,
+    find_package_path,
+    list_package_paths,
+    list_packages_by_source,
+    scan_for_workspaces,
 )
 
 
@@ -173,7 +172,7 @@ class TestIsSystemPrefix:
 
     def test_non_system(self) -> None:
         assert _is_system_prefix(Path("/home/user/ros_ws/install")) is False
-        assert _is_system_prefix(Path("/tmp/ws")) is False
+        assert _is_system_prefix(Path("/srv/ws")) is False
 
 
 class TestWorkspaceRootFromPrefix:
@@ -640,27 +639,45 @@ class TestGatherWorkspaceSrcRootsEnv:
             result = _gather_workspace_src_roots()
             assert src in result
 
-    def test_with_install_prefix(self, tmp_path: Path) -> None:
-        """Test with COLCON_PREFIX_PATH pointing to install space subdirectory."""
+    def test_with_isolated_install_prefix(self, tmp_path: Path) -> None:
+        """An isolated colcon prefix (<ws>/install/<pkg>) resolves to <ws>/src."""
         ws = tmp_path / "ws"
-        install = ws / "install"
-        install_lib = install / "lib"  # prefix is lib, parent.name is "install"
-        src = install / "src"
-        install_lib.mkdir(parents=True)
+        prefix = ws / "install" / "some_pkg"
+        src = ws / "src"
+        prefix.mkdir(parents=True)
         src.mkdir(parents=True)
 
         with mock.patch.dict(
             os.environ,
             {
                 "AMENT_PREFIX_PATH": "",
-                "COLCON_PREFIX_PATH": str(install_lib),
+                "COLCON_PREFIX_PATH": str(prefix),
                 "ROS2_WORKSPACE": "",
                 "COLCON_WORKSPACE": "",
             },
             clear=False,
         ):
-            result = _gather_workspace_src_roots()
-            assert src in result
+            assert src in _gather_workspace_src_roots()
+
+    def test_with_merged_install_prefix(self, tmp_path: Path) -> None:
+        """A merged colcon prefix (<ws>/install) also resolves to <ws>/src."""
+        ws = tmp_path / "ws"
+        install = ws / "install"
+        src = ws / "src"
+        install.mkdir(parents=True)
+        src.mkdir(parents=True)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": str(install),
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            assert src in _gather_workspace_src_roots()
 
 
 class TestListPackagesBySourceEnvCombinations:
@@ -690,18 +707,14 @@ class TestListPackagesBySourceEnvCombinations:
             assert "test_pkg" in all_pkgs
 
     def test_with_colcon_prefix_and_src(self, tmp_path: Path) -> None:
-        """Test with COLCON_PREFIX_PATH and corresponding src directory."""
+        """Unbuilt packages in <ws>/src are listed alongside the install space."""
         ws = tmp_path / "ws"
-        install = ws / "install"
-        src = install / "src"  # src under install (as per the code logic)
-        share = install / "share"
-        install_lib = install / "lib"  # prefix is lib, parent.name is "install"
+        prefix = ws / "install" / "built_pkg"
+        src = ws / "src"
 
-        install_lib.mkdir(parents=True)
+        (prefix / "share").mkdir(parents=True)
         src.mkdir(parents=True)
-        share.mkdir(parents=True)
 
-        # Add package in src
         pkg_dir = src / "src_pkg"
         pkg_dir.mkdir()
         (pkg_dir / "package.xml").write_text("<package><name>src_pkg</name></package>")
@@ -710,7 +723,7 @@ class TestListPackagesBySourceEnvCombinations:
             os.environ,
             {
                 "AMENT_PREFIX_PATH": "",
-                "COLCON_PREFIX_PATH": str(install_lib),
+                "COLCON_PREFIX_PATH": str(prefix),
                 "ROS2_WORKSPACE": "",
                 "COLCON_WORKSPACE": "",
             },

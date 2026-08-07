@@ -7,26 +7,39 @@ import os
 from pathlib import Path
 from unittest import mock
 
-
 from rostree.cli import (
-    cmd_scan,
-    cmd_list,
-    cmd_tree,
-    cmd_graph,
-    main,
-    _print_tree_text,
-    _generate_dot,
-    _generate_mermaid,
-    _collect_edges,
-    _collect_edges_multi,
-    _get_workspace_packages,
-    _mermaid_id,
+    GRAPH_MAX_PACKAGES,
     _check_graphviz,
     _check_matplotlib,
+    _collect_edges,
+    _collect_edges_multi,
+    _generate_dot,
+    _generate_mermaid,
+    _get_workspace_packages,
+    _mermaid_id,
+    _print_tree_text,
     _render_dot,
     _render_with_matplotlib,
+    cmd_graph,
+    cmd_list,
+    cmd_scan,
+    cmd_tree,
+    main,
 )
-from rostree.core.tree import DependencyNode
+from rostree.core.tree import DependencyGraph, DependencyNode, build_dependency_graph
+from tests.conftest import write_package
+
+
+def _graph_of(*nodes: DependencyNode) -> DependencyGraph:
+    """A minimal resolved graph standing in for `build_dependency_graph`."""
+    graph = DependencyGraph(roots=[n.name for n in nodes])
+    for node in nodes:
+        graph.edges[node.name] = [c.name for c in node.children]
+        graph.depths.setdefault(node.name, 0)
+        for child in node.children:
+            graph.edges.setdefault(child.name, [])
+            graph.depths.setdefault(child.name, 1)
+    return graph
 
 
 class TestPrintTreeText:
@@ -74,7 +87,7 @@ class TestPrintTreeText:
         _print_tree_text(node)
         captured = capsys.readouterr()
         assert "missing" in captured.out
-        assert "(not found)" in captured.out
+        assert "not found" in captured.out
 
     def test_cycle_node(self, capsys) -> None:
         node = DependencyNode(
@@ -86,7 +99,7 @@ class TestPrintTreeText:
         _print_tree_text(node)
         captured = capsys.readouterr()
         assert "cyclic" in captured.out
-        assert "(cycle)" in captured.out
+        assert "cycle" in captured.out
 
     def test_parse_error_node(self, capsys) -> None:
         node = DependencyNode(
@@ -97,7 +110,7 @@ class TestPrintTreeText:
         )
         _print_tree_text(node)
         captured = capsys.readouterr()
-        assert "(parse error)" in captured.out
+        assert "parse error" in captured.out
 
 
 class TestCmdScan:
@@ -552,12 +565,12 @@ class TestCmdTree:
             )
             result = cmd_tree(args)
             captured = capsys.readouterr()
-            # Returns 0 because tree is built with "(not found)"
-            assert result == 0
-            assert "nonexistent_xyz" in captured.out
+            # An unknown root package is an error, reported on stderr.
+            assert result == 1
+            assert "nonexistent_xyz" in captured.err
 
     def test_tree_returns_none(self, capsys) -> None:
-        """Test error handling when build_dependency_tree returns None."""
+        """Test error handling when the root package cannot be resolved."""
         with mock.patch("rostree.cli.build_dependency_tree", return_value=None):
             args = argparse.Namespace(
                 package="any_pkg",
@@ -772,8 +785,9 @@ class TestMain:
         assert result in (0, 1)  # May have no packages
 
     def test_tree_command(self) -> None:
+        # An unknown package is an error, not a one-node tree.
         result = main(["tree", "nonexistent_test_pkg"])
-        assert result == 0  # Returns placeholder node
+        assert result == 1
 
     def test_graph_help(self, capsys) -> None:
         try:
@@ -1396,7 +1410,7 @@ class TestCmdTui:
             args = argparse.Namespace(package=None)
             result = cmd_tui(args)
             assert result == 0
-            mock_app.assert_called_once_with(root_package=None)
+            mock_app.assert_called_once_with(root_package=None, runtime_only=True)
             mock_instance.run.assert_called_once()
 
     def test_cmd_tui_with_package(self) -> None:
@@ -1409,7 +1423,7 @@ class TestCmdTui:
             args = argparse.Namespace(package="rclpy")
             result = cmd_tui(args)
             assert result == 0
-            mock_app.assert_called_once_with(root_package="rclpy")
+            mock_app.assert_called_once_with(root_package="rclpy", runtime_only=True)
 
 
 class TestCollectEdgesWithCycles:
@@ -1571,19 +1585,20 @@ class TestOpenFile:
                 assert "open" in str(mock_run.call_args)
 
     def test_open_file_windows(self, tmp_path: Path) -> None:
-        """Test opening file on Windows."""
+        """Windows uses os.startfile, so no shell is involved."""
         from rostree.cli import _open_file
 
         test_file = tmp_path / "test.png"
         test_file.touch()
 
+        startfile = mock.MagicMock()
         with mock.patch("platform.system", return_value="Windows"):
-            with mock.patch("subprocess.run") as mock_run:
-                mock_run.return_value = mock.MagicMock()
-                result = _open_file(test_file)
-                assert result is True
-                mock_run.assert_called_once()
-                assert "start" in str(mock_run.call_args)
+            with mock.patch.object(os, "startfile", startfile, create=True):
+                with mock.patch("subprocess.run") as mock_run:
+                    result = _open_file(test_file)
+                    assert result is True
+                    startfile.assert_called_once_with(str(test_file))
+                    mock_run.assert_not_called()
 
     def test_open_file_error(self, tmp_path: Path, capsys) -> None:
         """Test opening file when error occurs."""
@@ -1602,221 +1617,186 @@ class TestOpenFile:
 
 
 class TestCmdGraphEdgeCases:
-    """Additional edge case tests for cmd_graph."""
+    """Edge cases for cmd_graph, exercised against real packages on disk."""
+
+    @staticmethod
+    def _args(tmp_path: Path, **overrides) -> argparse.Namespace:
+        base = dict(
+            package="test_pkg",
+            workspace=None,
+            format="dot",
+            output=None,
+            depth=1,
+            runtime=False,
+            source=[str(tmp_path)],
+            no_title=False,
+            hide_missing=False,
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
 
     def test_graph_package_limit_warning(self, tmp_path: Path, capsys) -> None:
-        """Test warning when too many packages."""
-        # Create more packages than the limit
-        many_packages = [f"pkg{i}" for i in range(60)]
+        """Too many workspace roots are capped, and the cap is announced."""
+        many_packages = [f"pkg{i}" for i in range(GRAPH_MAX_PACKAGES + 10)]
 
         with mock.patch("rostree.cli._get_workspace_packages", return_value=many_packages):
-            with mock.patch("rostree.cli.build_dependency_tree") as mock_build:
-                mock_build.return_value = DependencyNode(
-                    name="pkg0", version="1.0", description="", path="/p"
+            with mock.patch("rostree.cli.build_dependency_graph") as mock_build:
+                mock_build.return_value = _graph_of(
+                    DependencyNode(name="pkg0", version="1.0", description="", path="/p")
                 )
-                args = argparse.Namespace(
-                    package=None,
-                    workspace=None,
-                    format="dot",
-                    output=None,
-                    depth=None,
-                    runtime=False,
-                    source=None,
-                    no_title=False,
-                )
-                cmd_graph(args)
+                cmd_graph(self._args(tmp_path, package=None, depth=None))
                 captured = capsys.readouterr()
-                assert "Limiting to first 50" in captured.err
+                assert f"Limiting to first {GRAPH_MAX_PACKAGES}" in captured.err
+                # The cap applies to root packages handed to a single graph pass.
+                assert len(mock_build.call_args[0][0]) == GRAPH_MAX_PACKAGES
 
     def test_graph_no_valid_trees(self, tmp_path: Path, capsys) -> None:
-        """Test when no valid trees can be built."""
+        """Nothing resolved means a clear error rather than an empty graph."""
         with mock.patch("rostree.cli._get_workspace_packages", return_value=["pkg1"]):
-            with mock.patch("rostree.cli.build_dependency_tree", return_value=None):
-                args = argparse.Namespace(
-                    package=None,
-                    workspace=None,
-                    format="dot",
-                    output=None,
-                    depth=None,
-                    runtime=False,
-                    source=None,
-                    no_title=False,
-                )
-                result = cmd_graph(args)
+            with mock.patch(
+                "rostree.cli.build_dependency_graph", return_value=DependencyGraph(roots=[])
+            ):
+                result = cmd_graph(self._args(tmp_path, package=None, depth=None))
                 assert result == 1
                 captured = capsys.readouterr()
                 assert "No valid package trees" in captured.err
 
-    def test_graph_workspace_title(self, tmp_path: Path, capsys) -> None:
-        """Test workspace-wide graph title generation."""
-        tree = DependencyNode(name="pkg1", version="1.0", description="", path="/p")
-
+    def test_graph_workspace_title(self, tmp_path: Path, make_package, capsys) -> None:
+        """A workspace-wide graph is titled as such."""
+        make_package("pkg1")
         with mock.patch("rostree.cli._get_workspace_packages", return_value=["pkg1"]):
-            with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-                args = argparse.Namespace(
-                    package=None,
-                    workspace=None,
-                    format="dot",
-                    output=None,
-                    depth=None,
-                    runtime=False,
-                    source=None,
-                    no_title=False,
+            result = cmd_graph(self._args(tmp_path, package=None, depth=None))
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "Workspace dependencies" in captured.out
+            assert "pkg1" in captured.out
+
+    def test_graph_render_output_path_handling(self, tmp_path: Path, make_package) -> None:
+        """An output path with the wrong suffix is corrected to the render format."""
+        make_package("test_pkg")
+        with mock.patch("rostree.cli._check_graphviz", return_value=True):
+            with mock.patch("rostree.cli._render_dot", return_value=True) as mock_render:
+                args = self._args(
+                    tmp_path, output=str(tmp_path / "out.txt"), render="png", open=False
                 )
                 result = cmd_graph(args)
                 assert result == 0
+                assert str(mock_render.call_args[0][1]).endswith(".png")
+
+    def test_graph_render_default_filename(self, tmp_path: Path, make_package) -> None:
+        """Without -o, the workspace name becomes the file name."""
+        ws = tmp_path / "my_ws"
+        (ws / "src").mkdir(parents=True)
+        write_package(ws / "src", "pkg1")
+        with mock.patch("rostree.cli._check_graphviz", return_value=True):
+            with mock.patch("rostree.cli._render_dot", return_value=True) as mock_render:
+                args = self._args(
+                    tmp_path,
+                    package=None,
+                    workspace=str(ws),
+                    depth=1,
+                    render="svg",
+                    open=False,
+                    source=None,
+                )
+                with mock.patch("rostree.cli._get_workspace_packages", return_value=["pkg1"]):
+                    result = cmd_graph(args)
+                    assert result == 0
+                    assert "my_ws" in str(mock_render.call_args[0][1])
+
+    def test_graph_workspace_flag_resolves_unsourced_packages(self, tmp_path: Path, capsys) -> None:
+        """-w makes an unsourced workspace's own packages resolvable."""
+        ws = tmp_path / "ws"
+        (ws / "src").mkdir(parents=True)
+        write_package(ws / "src", "leaf")
+        write_package(ws / "src", "app", depends=["leaf"])
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AMENT_PREFIX_PATH": "",
+                "COLCON_PREFIX_PATH": "",
+                "ROS2_WORKSPACE": "",
+                "COLCON_WORKSPACE": "",
+            },
+            clear=False,
+        ):
+            args = self._args(tmp_path, package=None, workspace=str(ws), depth=None, source=None)
+            result = cmd_graph(args)
+            assert result == 0
+            captured = capsys.readouterr()
+            # The edge exists because -w put the workspace on the search path.
+            assert '"app" -> "leaf"' in captured.out
+
+    def test_graph_no_rendering_backend(self, tmp_path: Path, make_package, capsys) -> None:
+        """With neither Graphviz nor matplotlib, say so and fail."""
+        make_package("test_pkg")
+        with mock.patch("rostree.cli._check_graphviz", return_value=False):
+            with mock.patch("rostree.cli._check_matplotlib", return_value=False):
+                result = cmd_graph(self._args(tmp_path, render="png", open=False))
+                assert result == 1
                 captured = capsys.readouterr()
-                assert "Workspace dependencies" in captured.out
+                assert "No rendering backend" in captured.err
 
-    def test_graph_render_output_path_handling(self, tmp_path: Path) -> None:
-        """Test output path handling when rendering."""
-        tree = DependencyNode(name="test_pkg", version="1.0", description="", path="/p")
+    def test_graph_render_failed(self, tmp_path: Path, make_package) -> None:
+        """A failing renderer propagates a non-zero exit code."""
+        make_package("test_pkg")
+        with mock.patch("rostree.cli._check_graphviz", return_value=True):
+            with mock.patch("rostree.cli._render_dot", return_value=False):
+                result = cmd_graph(self._args(tmp_path, render="png", open=False))
+                assert result == 1
 
-        with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-            with mock.patch("rostree.cli._check_graphviz", return_value=True):
-                with mock.patch("rostree.cli._render_dot", return_value=True) as mock_render:
-                    # Test with output path that needs extension change (use .txt, not .dot)
-                    args = argparse.Namespace(
-                        package="test_pkg",
-                        workspace=None,
-                        format="dot",
-                        output=str(tmp_path / "out.txt"),
-                        depth=1,
-                        runtime=False,
-                        source=None,
-                        no_title=False,
+    def test_graph_render_with_open(self, tmp_path: Path, make_package) -> None:
+        """--open hands the rendered file to the system viewer."""
+        make_package("test_pkg")
+        with mock.patch("rostree.cli._check_graphviz", return_value=True):
+            with mock.patch("rostree.cli._render_dot", return_value=True):
+                with mock.patch("rostree.cli._open_file") as mock_open:
+                    args = self._args(
+                        tmp_path,
+                        output=str(tmp_path / "out.png"),
                         render="png",
-                        open=False,
+                        open=True,
                     )
                     result = cmd_graph(args)
                     assert result == 0
-                    # Check that extension was changed to .png
-                    call_args = mock_render.call_args[0]
-                    assert str(call_args[1]).endswith(".png")
+                    mock_open.assert_called_once()
 
-    def test_graph_render_default_filename(self, tmp_path: Path, capsys) -> None:
-        """Test default filename generation for render."""
-        tree = DependencyNode(name="test_pkg", version="1.0", description="", path="/p")
-
-        with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-            with mock.patch("rostree.cli._check_graphviz", return_value=True):
-                with mock.patch("rostree.cli._render_dot", return_value=True) as mock_render:
-                    # Test with workspace (no package, no output path)
-                    args = argparse.Namespace(
-                        package=None,
-                        workspace=str(tmp_path / "my_ws"),
-                        format="dot",
-                        output=None,
-                        depth=1,
-                        runtime=False,
-                        source=None,
-                        no_title=False,
-                        render="svg",
-                        open=False,
-                    )
-                    with mock.patch("rostree.cli._get_workspace_packages", return_value=["pkg1"]):
-                        result = cmd_graph(args)
-                        assert result == 0
-                        call_args = mock_render.call_args[0]
-                        # Should use workspace name as base
-                        assert "my_ws" in str(call_args[1])
-
-    def test_graph_no_rendering_backend(self, tmp_path: Path, capsys) -> None:
-        """Test error when no rendering backend available."""
-        tree = DependencyNode(name="pkg", version="1.0", description="", path="/p")
-
-        with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-            with mock.patch("rostree.cli._check_graphviz", return_value=False):
-                with mock.patch("rostree.cli._check_matplotlib", return_value=False):
-                    args = argparse.Namespace(
-                        package="pkg",
-                        workspace=None,
-                        format="dot",
-                        output=None,
-                        depth=1,
-                        runtime=False,
-                        source=None,
-                        no_title=False,
-                        render="png",
-                        open=False,
-                    )
-                    result = cmd_graph(args)
-                    assert result == 1
-                    captured = capsys.readouterr()
-                    assert "No rendering backend" in captured.err
-
-    def test_graph_render_failed(self, tmp_path: Path, capsys) -> None:
-        """Test when rendering fails."""
-        tree = DependencyNode(name="pkg", version="1.0", description="", path="/p")
-
-        with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-            with mock.patch("rostree.cli._check_graphviz", return_value=True):
-                with mock.patch("rostree.cli._render_dot", return_value=False):
-                    args = argparse.Namespace(
-                        package="pkg",
-                        workspace=None,
-                        format="dot",
-                        output=None,
-                        depth=1,
-                        runtime=False,
-                        source=None,
-                        no_title=False,
-                        render="png",
-                        open=False,
-                    )
-                    result = cmd_graph(args)
-                    assert result == 1
-
-    def test_graph_render_with_open(self, tmp_path: Path) -> None:
-        """Test render with --open flag."""
-        tree = DependencyNode(name="pkg", version="1.0", description="", path="/p")
-
-        with mock.patch("rostree.cli.build_dependency_tree", return_value=tree):
-            with mock.patch("rostree.cli._check_graphviz", return_value=True):
-                with mock.patch("rostree.cli._render_dot", return_value=True):
-                    with mock.patch("rostree.cli._open_file") as mock_open:
-                        args = argparse.Namespace(
-                            package="pkg",
-                            workspace=None,
-                            format="dot",
-                            output=str(tmp_path / "out.png"),
-                            depth=1,
-                            runtime=False,
-                            source=None,
-                            no_title=False,
-                            render="png",
-                            open=True,
-                        )
-                        result = cmd_graph(args)
-                        assert result == 0
-                        mock_open.assert_called_once()
-
-    def test_graph_progress_output(self, tmp_path: Path, capsys) -> None:
-        """Test progress output for multiple packages."""
-        trees = [
-            DependencyNode(name=f"pkg{i}", version="1.0", description="", path="/p")
-            for i in range(3)
-        ]
-
+    def test_graph_resolves_whole_dag_in_one_pass(self, tmp_path: Path, make_package) -> None:
+        """Every root is graphed from a single dependency resolution pass."""
+        make_package("pkg0", depends=["shared"])
+        make_package("pkg1", depends=["shared"])
+        make_package("shared")
         with mock.patch(
-            "rostree.cli._get_workspace_packages", return_value=["pkg0", "pkg1", "pkg2"]
+            "rostree.cli._get_workspace_packages", return_value=["pkg0", "pkg1", "shared"]
         ):
-            with mock.patch("rostree.cli.build_dependency_tree", side_effect=trees):
-                args = argparse.Namespace(
-                    package=None,
-                    workspace=None,
-                    format="dot",
-                    output=None,
-                    depth=2,
-                    runtime=False,
-                    source=None,
-                    no_title=False,
-                )
-                result = cmd_graph(args)
+            with mock.patch(
+                "rostree.cli.build_dependency_graph",
+                side_effect=build_dependency_graph,
+            ) as spy:
+                result = cmd_graph(self._args(tmp_path, package=None, depth=None))
                 assert result == 0
-                captured = capsys.readouterr()
-                assert "Processing pkg0 (1/3)" in captured.err
-                assert "Processing pkg1 (2/3)" in captured.err
+                assert spy.call_count == 1
+
+    def test_graph_includes_unresolved_dependencies(
+        self, tmp_path: Path, make_package, capsys
+    ) -> None:
+        """Edges to packages with no manifest are drawn dashed, not dropped."""
+        make_package("test_pkg", depends=["nowhere_to_be_found"])
+        result = cmd_graph(self._args(tmp_path, depth=None))
+        assert result == 0
+        captured = capsys.readouterr()
+        assert '"test_pkg" -> "nowhere_to_be_found"' in captured.out
+        assert "dashed" in captured.out
+
+    def test_graph_hide_missing_drops_unresolved(
+        self, tmp_path: Path, make_package, capsys
+    ) -> None:
+        """--hide-missing restores the old drop-the-edge behaviour on request."""
+        make_package("test_pkg", depends=["nowhere_to_be_found"])
+        result = cmd_graph(self._args(tmp_path, depth=None, hide_missing=True))
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "nowhere_to_be_found" not in captured.out
 
 
 class TestMainFunction:

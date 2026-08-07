@@ -6,8 +6,21 @@ import os
 from pathlib import Path
 from unittest import mock
 
+from rostree.core.tree import (
+    DependencyNode,
+    NodeStatus,
+    build_dependency_graph,
+    build_dependency_tree,
+    tree_stats,
+)
+from tests.conftest import write_package
 
-from rostree.core.tree import DependencyNode, build_dependency_tree
+_EMPTY_ENV = {
+    "AMENT_PREFIX_PATH": "",
+    "COLCON_PREFIX_PATH": "",
+    "ROS2_WORKSPACE": "",
+    "COLCON_WORKSPACE": "",
+}
 
 
 class TestDependencyNode:
@@ -40,6 +53,7 @@ class TestDependencyNode:
             "version": "2.0",
             "description": "desc",
             "path": "/path",
+            "status": "ok",
             "children": [],
         }
 
@@ -396,3 +410,226 @@ class TestBuildDependencyTree:
                 assert result.name == "parseerr_pkg"
                 assert result.description == "(parse error)"
                 assert str(pkg_xml) in result.path
+
+
+class TestRepeatCollapsing:
+    """Each package is expanded once, where it first appears."""
+
+    def _diamond(self, root: Path) -> None:
+        """top -> [left, right] -> shared -> leaf."""
+        write_package(root, "leaf")
+        write_package(root, "shared", depends=["leaf"])
+        write_package(root, "left", depends=["shared"])
+        write_package(root, "right", depends=["shared"])
+        write_package(root, "top", depends=["left", "right"])
+
+    def test_shared_subtree_is_expanded_once(self, tmp_path: Path) -> None:
+        self._diamond(tmp_path)
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("top", extra_source_roots=[tmp_path])
+        expanded = [n for n in tree.walk() if n.name == "shared" and n.children]
+        repeats = [n for n in tree.walk() if n.name == "shared" and n.status is NodeStatus.REPEAT]
+        assert len(expanded) == 1
+        assert len(repeats) == 1
+
+    def test_full_expansion_repeats_the_subtree(self, tmp_path: Path) -> None:
+        self._diamond(tmp_path)
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree(
+                "top", extra_source_roots=[tmp_path], collapse_repeats=False
+            )
+        expanded = [n for n in tree.walk() if n.name == "shared" and n.children]
+        assert len(expanded) == 2
+        assert not any(n.status is NodeStatus.REPEAT for n in tree.walk())
+
+    def test_expansion_happens_where_the_tree_first_prints_it(self, tmp_path: Path) -> None:
+        """The first *printed* occurrence carries the subtree, not the shallowest."""
+        write_package(tmp_path, "shared", depends=["leaf"])
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "middle", depends=["shared"])
+        write_package(tmp_path, "top", depends=["middle", "shared"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("top", extra_source_roots=[tmp_path])
+        middle = next(c for c in tree.children if c.name == "middle")
+        nested = next(c for c in middle.children if c.name == "shared")
+        direct = next(c for c in tree.children if c.name == "shared")
+        # middle comes first in top's dependency list, so shared expands there.
+        assert nested.children
+        assert direct.status is NodeStatus.REPEAT
+
+    def test_a_repeat_always_refers_to_something_printed_earlier(self, tmp_path: Path) -> None:
+        """The "see above" marker has to be true for every repeat in the tree."""
+        for layer in range(4):
+            for i in range(4):
+                deps = [f"p{layer - 1}_{j}" for j in range(4)] if layer else []
+                write_package(tmp_path, f"p{layer}_{i}", depends=deps)
+        write_package(tmp_path, "root_pkg", depends=[f"p3_{i}" for i in range(4)])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("root_pkg", extra_source_roots=[tmp_path])
+
+        expanded_at: dict[str, int] = {}
+        for position, node in enumerate(tree.walk()):  # walk() is print order
+            if node.status is NodeStatus.REPEAT:
+                assert node.name in expanded_at, f"{node.name} claims 'above' but is not"
+                assert expanded_at[node.name] < position
+            elif node.status is NodeStatus.OK and node.children:
+                expanded_at.setdefault(node.name, position)
+
+    def test_tree_stays_linear_in_the_number_of_packages(self, tmp_path: Path) -> None:
+        """A layered graph must not blow up the way full expansion does."""
+        for layer in range(6):
+            for i in range(4):
+                deps = [f"p{layer - 1}_{j}" for j in range(4)] if layer else []
+                write_package(tmp_path, f"p{layer}_{i}", depends=deps)
+        write_package(tmp_path, "root_pkg", depends=[f"p5_{i}" for i in range(4)])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("root_pkg", extra_source_roots=[tmp_path])
+        stats = tree_stats(tree)
+        assert stats["packages"] == 25
+        # Bounded by packages + edges (25 + 84), not by the number of paths.
+        assert stats["nodes"] < 150
+
+    def test_cycles_are_marked_not_followed(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "a", depends=["b"])
+        write_package(tmp_path, "b", depends=["a"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("a", extra_source_roots=[tmp_path])
+        cycle_nodes = [n for n in tree.walk() if n.status is NodeStatus.CYCLE]
+        assert [n.name for n in cycle_nodes] == ["a"]
+        assert cycle_nodes[0].children == []
+
+    def test_missing_dependency_is_marked(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app", depends=["ghost"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("app", extra_source_roots=[tmp_path])
+        ghost = tree.children[0]
+        assert ghost.status is NodeStatus.MISSING
+        assert ghost.is_error
+        assert ghost.to_dict()["status"] == "missing"
+
+    def test_depth_limited_nodes_are_marked_truncated(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "mid", depends=["leaf"])
+        write_package(tmp_path, "top", depends=["mid"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("top", max_depth=1, extra_source_roots=[tmp_path])
+        mid = tree.children[0]
+        assert mid.status is NodeStatus.TRUNCATED
+        assert mid.is_placeholder
+        assert mid.children == []
+
+    def test_max_nodes_stops_the_build(self, tmp_path: Path) -> None:
+        for i in range(30):
+            write_package(tmp_path, f"chain_{i}", depends=[f"chain_{i + 1}"] if i < 29 else [])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("chain_0", extra_source_roots=[tmp_path], max_nodes=5)
+        assert tree_stats(tree)["nodes"] <= 6
+
+    def test_progress_callback_is_invoked(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "top", depends=["leaf"])
+        seen: list[str] = []
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            build_dependency_tree(
+                "top", extra_source_roots=[tmp_path], on_progress=lambda n, name: seen.append(name)
+            )
+        assert seen == ["top", "leaf"]
+
+
+class TestBuildDependencyGraph:
+    """Tests for the breadth-first DAG resolver."""
+
+    def test_resolves_each_package_once(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "left", depends=["leaf"])
+        write_package(tmp_path, "right", depends=["leaf"])
+        write_package(tmp_path, "top", depends=["left", "right"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("top", extra_source_roots=[tmp_path])
+        assert set(graph.packages) == {"top", "left", "right", "leaf"}
+        assert graph.depths == {"top": 0, "left": 1, "right": 1, "leaf": 2}
+        assert graph.edge_pairs() == {
+            ("top", "left"),
+            ("top", "right"),
+            ("left", "leaf"),
+            ("right", "leaf"),
+        }
+
+    def test_accepts_multiple_roots(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "one", depends=["leaf"])
+        write_package(tmp_path, "two", depends=["leaf"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph(["one", "two"], extra_source_roots=[tmp_path])
+        assert graph.roots == ["one", "two"]
+        assert graph.depths["leaf"] == 1
+
+    def test_records_missing_dependencies(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app", depends=["ghost"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("app", extra_source_roots=[tmp_path])
+        assert graph.missing == {"ghost"}
+        assert graph.node_count == 2
+        assert graph.edge_pairs(include_missing=False) == set()
+
+    def test_max_depth_stops_the_walk(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "mid", depends=["leaf"])
+        write_package(tmp_path, "top", depends=["mid"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("top", max_depth=1, extra_source_roots=[tmp_path])
+        assert "leaf" not in graph.packages
+
+    def test_detects_cycles(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "a", depends=["b"])
+        write_package(tmp_path, "b", depends=["c"])
+        write_package(tmp_path, "c", depends=["a"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("a", extra_source_roots=[tmp_path])
+        assert graph.cycles() == [["a", "b", "c", "a"]]
+
+    def test_reports_no_cycles_for_a_dag(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "top", depends=["leaf"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("top", extra_source_roots=[tmp_path])
+        assert graph.cycles() == []
+
+    def test_runtime_only_skips_build_dependencies(self, tmp_path: Path) -> None:
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <exec_depend>runtime_dep</exec_depend>
+  <build_depend>build_dep</build_depend>
+</package>
+"""
+        )
+        write_package(tmp_path, "runtime_dep")
+        write_package(tmp_path, "build_dep")
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            graph = build_dependency_graph("app", runtime_only=True, extra_source_roots=[tmp_path])
+        assert "runtime_dep" in graph.packages
+        assert "build_dep" not in graph.packages
+
+
+class TestTreeStats:
+    """Tests for the tree summary."""
+
+    def test_counts_everything(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "shared", depends=["leaf"])
+        write_package(tmp_path, "left", depends=["shared"])
+        write_package(tmp_path, "right", depends=["shared"])
+        write_package(tmp_path, "top", depends=["left", "right", "ghost"])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("top", extra_source_roots=[tmp_path])
+        stats = tree_stats(tree)
+        assert stats["packages"] == 5  # top, left, right, shared, leaf
+        assert stats["missing"] == 1
+        assert stats["repeats"] == 1
+        assert stats["cycles"] == 0
+        assert stats["depth"] == 3
