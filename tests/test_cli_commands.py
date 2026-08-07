@@ -280,3 +280,35 @@ class TestTreeRendering:
         assert result == 1
         assert "Did you mean" in err
         assert "navigation_core" in err
+
+
+class TestCmdWhyValidation:
+    """Argument validation for `rostree why`."""
+
+    def test_same_package_twice_is_rejected(self, tmp_path: Path, capsys) -> None:
+        stack(tmp_path)
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_why(args(tmp_path, package="app", dependency="app", depth=None, limit=10))
+        assert result == 1
+        assert "own starting point" in capsys.readouterr().err
+
+    def test_unknown_package_twice_is_still_rejected(self, tmp_path: Path, capsys) -> None:
+        """A bogus name must not slip through just because both arguments match."""
+        stack(tmp_path)
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_why(
+                args(tmp_path, package="bogus", dependency="bogus", depth=None, limit=10)
+            )
+        assert result == 1
+        assert "Package not found" in capsys.readouterr().err
+
+    def test_unresolved_dependency_name_is_allowed(self, tmp_path: Path, capsys) -> None:
+        """The target may be a rosdep key that resolves to no package."""
+        stack(tmp_path)
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_why(
+                args(tmp_path, package="app", dependency="missing_key", depth=None, limit=10)
+            )
+        out = capsys.readouterr().out
+        assert result == 0
+        assert "app → core → util → missing_key" in out or "app → util → missing_key" in out

@@ -129,19 +129,23 @@ def _populate_textual_tree(
     max_nodes: int = MAX_TREE_NODES,
     node_count: list[int] | None = None,
 ) -> None:
-    """Recursively add DependencyNode children; cap depth and total nodes."""
+    """
+    Build rows for the whole subtree, reusing any that already exist.
+
+    Rows are normally created lazily as nodes are expanded, so this has to be
+    idempotent: filling a branch that was already opened must not add a second
+    copy of its children.
+    """
     if node_count is None:
         node_count = [0]
-    for child in getattr(node, "children", []):
-        if node_count[0] >= max_nodes:
-            tn.add_leaf(f"[dim]… truncated ({max_nodes} nodes max)[/]")
-            return
-        if depth >= max_depth:
-            tn.add_leaf(f"[dim]{child.name} …[/]")
+    if depth >= max_depth or node_count[0] >= max_nodes:
+        return
+    _populate_lazy(tn, node)
+    for child_tn in tn.children:
+        child = child_tn.data
+        if child is None or isinstance(child, str):
             continue
         node_count[0] += 1
-        child_tn = tn.add(_dep_label(child), expand=False)
-        child_tn.data = child
         _populate_textual_tree(
             child_tn,
             child,
@@ -692,10 +696,12 @@ class DepTreeApp(App[None]):
 
     def _load_tree(self, root_package: str) -> None:
         """Kick off a background build of the dependency tree for a package."""
+        if self._building:
+            # A build is already in flight; dropping the request must not leave
+            # _root_package pointing at a tree that was never rendered.
+            return
         self._root_package = root_package
         self._search_matches = []
-        if self._building:
-            return
         self._building = True
         try:
             self.query_one("#filter_input").remove_class("visible")
@@ -863,6 +869,15 @@ class DepTreeApp(App[None]):
         if focused is not None and getattr(focused, "id", None) == "filter_input":
             self._focus_tree(force=True)
             return
+        if self._reverse_view:
+            # The dependents view can be opened straight from the package list,
+            # where there is no tree to fall back to — go to whichever we came from.
+            self._reverse_view = False
+            if self._root_package:
+                self._load_tree(self._root_package)
+            else:
+                self._load_main_view()
+            return
         if self._filter and not self._root_package:
             self._filter = ""
             try:
@@ -875,7 +890,6 @@ class DepTreeApp(App[None]):
             return
         self._root_package = None
         self._root_node = None
-        self._reverse_view = False
         self._load_main_view()
 
     def action_refresh(self) -> None:
@@ -895,7 +909,6 @@ class DepTreeApp(App[None]):
         if self._root_node is not None:
             # expand_all() only reveals rows that exist, so fill the tree first.
             _populate_textual_tree(tree.root, self._root_node)
-            tree.root._rostree_filled = True  # type: ignore[attr-defined]
         try:
             tree.root.expand_all()
         except Exception:
@@ -988,7 +1001,16 @@ class DepTreeApp(App[None]):
             return
         self._extra_source_roots.append(path)
         self.notify(f"Added: {path}", severity="information", timeout=2)
-        self.action_refresh()
+        # The new root changes what the index can see, so always rescan — even
+        # when a tree is open and action_refresh() would only rebuild that tree.
+        self._packages_cache = None
+        self._packages_loading = False
+        self._index = None
+        self._start_package_scan()
+        if self._root_package:
+            self._load_tree(self._root_package)
+        else:
+            self._load_main_view()
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
@@ -1004,7 +1026,6 @@ class DepTreeApp(App[None]):
         if self._root_node is not None:
             # Search the resolved tree, not just the rows currently on screen.
             _populate_textual_tree(tree.root, self._root_node)
-            tree.root._rostree_filled = True  # type: ignore[attr-defined]
         self._collect_matches(tree.root, self._search_query)
 
         if not self._search_matches:

@@ -166,16 +166,22 @@ class TestDependencyTree:
                     await _start(app, pilot)
                     await _settle(app, pilot, lambda: app._root_node is not None)
                     root = _tree(app).root
-                    shared = next(c for c in root.children if "shared_utils" in str(c.label))
-                    rcutils = next(c for c in shared.children if "rcutils_like" in str(c.label))
-                    # rcutils_like sits past the initial two levels of expansion, so
+                    middleware = next(c for c in root.children if "middleware" in str(c.label))
+                    shared = next(c for c in middleware.children if "shared_utils" in str(c.label))
+                    # shared_utils sits past the initial two levels of expansion, so
                     # its own row exists but its children have not been built yet.
-                    assert list(rcutils.children) == []
-                    assert getattr(rcutils, "_rostree_filled", False) is False
-                    rcutils.expand()
+                    assert list(shared.children) == []
+                    assert getattr(shared, "_rostree_filled", False) is False
+                    shared.expand()
                     await pilot.pause()
-                    assert _labels(rcutils) == ["logging_backend v1.0.0"]
-                    assert rcutils._rostree_filled is True
+                    assert _labels(shared) == ["rcutils_like v1.0.0"]
+                    assert shared._rostree_filled is True
+
+                    # Expanding again must not duplicate the rows.
+                    shared.collapse()
+                    shared.expand()
+                    await pilot.pause()
+                    assert _labels(shared) == ["rcutils_like v1.0.0"]
 
         asyncio.run(scenario())
 
@@ -190,12 +196,13 @@ class TestDependencyTree:
                     await _settle(app, pilot, lambda: app._root_node is not None)
                     root = _tree(app).root
                     middleware = next(c for c in root.children if "middleware" in str(c.label))
-                    # shared_utils is expanded once, at its shallowest position
-                    # (directly under robot_app); under middleware it is a reference.
-                    direct = next(c for c in root.children if "shared_utils" in str(c.label))
+                    # middleware is listed first, so shared_utils expands underneath
+                    # it; robot_app's own edge to shared_utils is a back-reference,
+                    # and it is printed after the copy it points at.
                     nested = next(c for c in middleware.children if "shared_utils" in str(c.label))
-                    assert "shown above" not in str(direct.label)
-                    assert "shown above" in str(nested.label)
+                    direct = next(c for c in root.children if "shared_utils" in str(c.label))
+                    assert "shown above" not in str(nested.label)
+                    assert "shown above" in str(direct.label)
 
         asyncio.run(scenario())
 
@@ -294,5 +301,86 @@ class TestExtraViews:
                 async with app.run_test(size=(120, 40)) as pilot:
                     await _start(app, pilot)
                     assert "No ROS 2 packages found" in app.details_text
+
+        asyncio.run(scenario())
+
+
+class TestReviewRegressions:
+    """Regressions found while reviewing the v0.3.0 diff."""
+
+    def test_expand_all_does_not_duplicate_rows(self, tmp_path: Path) -> None:
+        prefix = build_install_space(tmp_path)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                app = DepTreeApp(root_package="robot_app")
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await _start(app, pilot)
+                    await _settle(app, pilot, lambda: app._root_node is not None)
+                    before = _labels(_tree(app).root)
+                    await pilot.press("e")
+                    await pilot.pause()
+                    assert _labels(_tree(app).root) == before
+                    await pilot.press("e")
+                    await pilot.pause()
+                    assert _labels(_tree(app).root) == before
+
+        asyncio.run(scenario())
+
+    def test_search_does_not_duplicate_rows(self, tmp_path: Path) -> None:
+        prefix = build_install_space(tmp_path)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                app = DepTreeApp(root_package="robot_app")
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await _start(app, pilot)
+                    await _settle(app, pilot, lambda: app._root_node is not None)
+                    before = _labels(_tree(app).root)
+                    app._on_search_done("shared")
+                    await pilot.pause()
+                    assert _labels(_tree(app).root) == before
+                    # Every match is a distinct row, not the same row counted twice.
+                    assert len(app._search_matches) == len(set(map(id, app._search_matches)))
+
+        asyncio.run(scenario())
+
+    def test_escape_leaves_the_dependents_view_from_the_package_list(self, tmp_path: Path) -> None:
+        prefix = build_install_space(tmp_path)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                app = DepTreeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await _start(app, pilot)
+                    section = _tree(app).root.children[0]
+                    target = next(c for c in section.children if "shared_utils" in str(c.label))
+                    # Move the cursor without selecting: selecting would open the
+                    # package's own tree, which is a different path back.
+                    _tree(app).cursor_line = target.line
+                    await pilot.pause()
+                    assert app._root_package is None
+                    await pilot.press("v")
+                    await _settle(app, pilot, lambda: "depending on" in str(_tree(app).root.label))
+                    await pilot.press("escape")
+                    await pilot.pause()
+                    assert app._reverse_view is False
+                    assert "Packages by source" in str(_tree(app).root.label)
+
+        asyncio.run(scenario())
+
+    def test_second_selection_during_a_build_is_not_half_applied(self, tmp_path: Path) -> None:
+        """Dropping a request must not leave _root_package pointing at it."""
+        prefix = build_install_space(tmp_path)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                app = DepTreeApp(root_package="robot_app")
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await _start(app, pilot)
+                    await _settle(app, pilot, lambda: app._root_node is not None)
+                    app._building = True  # pretend a build is in flight
+                    app._load_tree("middleware")
+                    assert app._root_package == "robot_app"
 
         asyncio.run(scenario())

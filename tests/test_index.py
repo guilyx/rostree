@@ -210,3 +210,35 @@ class TestIndexCache:
             first = get_index()
             clear_index_cache()
             assert get_index() is not first
+
+
+class TestReverseDependencyCaching:
+    """The cache must not answer one tag set with another's map."""
+
+    def test_runtime_and_full_maps_do_not_share_a_cache_entry(self, tmp_path: Path) -> None:
+        share = tmp_path / "install" / "share"
+        share.mkdir(parents=True)
+        write_package(share, "runtime_dep")
+        write_package(share, "build_dep")
+        (share / "app").mkdir()
+        (share / "app" / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <exec_depend>runtime_dep</exec_depend>
+  <build_depend>build_dep</build_depend>
+</package>
+"""
+        )
+        env = dict(EMPTY_ENV, AMENT_PREFIX_PATH=str(tmp_path / "install"))
+        with mock.patch.dict(os.environ, env, clear=False):
+            index = build_index()
+
+        runtime = index.reverse_dependencies(include_tags=("depend", "exec_depend"))
+        full = index.reverse_dependencies()
+        assert runtime.get("build_dep") is None
+        assert full["build_dep"] == {"app"}
+        # ...and asking again in the original order still gives the original answer.
+        assert index.reverse_dependencies(include_tags=("depend", "exec_depend")) == runtime

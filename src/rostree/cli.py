@@ -108,7 +108,8 @@ def _node_label(node: DependencyNode, *, show_desc: bool) -> Text:
 
 
 #: How many back-reference names to spell out before summarising the rest.
-_REPEAT_PREVIEW = 6
+#: Kept small because these lines sit at the deepest indentation in the tree.
+_REPEAT_PREVIEW = 4
 
 
 def _repeat_summary(repeats: list[DependencyNode]) -> Text:
@@ -350,11 +351,16 @@ def _suggest(name: str, index: PackageIndex, limit: int = 5) -> None:
 def cmd_why(args: argparse.Namespace) -> int:
     """Explain how one package ends up depending on another."""
     index = _load_index(args)
-    for name in (args.package, args.dependency):
-        if index.get(name) is None and name != args.dependency:
-            _err.print(f"[red]Package not found:[/] {name}")
-            _suggest(name, index)
-            return 1
+    # Only the starting package has to exist. The dependency may legitimately be
+    # an unresolved name (a rosdep key, or something not built yet) that still
+    # shows up as an edge in the graph.
+    if index.get(args.package) is None:
+        _err.print(f"[red]Package not found:[/] {args.package}")
+        _suggest(args.package, index)
+        return 1
+    if args.package == args.dependency:
+        _err.print(f"[yellow]{args.package} is its own starting point.[/]")
+        return 1
 
     graph = build_dependency_graph(
         args.package,
@@ -934,6 +940,15 @@ def cmd_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_global_args(parser: argparse.ArgumentParser) -> None:
+    """Flags accepted both before and after the subcommand."""
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable coloured output (NO_COLOR is honoured too)",
+    )
+
+
 def _add_source_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-s",
@@ -962,7 +977,7 @@ def main(argv: list[str] | None = None) -> int:
     from rostree import __version__
 
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--no-color", action="store_true", help="Disable coloured output")
+    _add_global_args(parser)
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -1185,6 +1200,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Follow build and test dependencies too (default: runtime only)",
     )
     tui_parser.set_defaults(func=cmd_tui)
+
+    for subparser in subparsers.choices.values():
+        _add_global_args(subparser)
 
     args = parser.parse_args(argv)
     _configure_console(args)

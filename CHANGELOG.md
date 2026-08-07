@@ -84,6 +84,24 @@ them near-instant and reworks the interface around them.
   `quick_package_name()` helper.
 - Worker results in the TUI are routed to the callback that asked for them, rather
   than to whichever handler saw the completion event first.
+- **`↩ see above` now always refers to something printed earlier.** Expansion was
+  chosen by shortest distance from the root while the tree renders depth-first, so
+  a back-reference could point at a subtree printed *below* it. Each package is now
+  expanded where the tree first prints it, which also removes a whole breadth-first
+  pass from tree building.
+- Reverse dependencies were cached without keying on the dependency tag set, so a
+  runtime-only lookup and a full lookup returned whichever ran first.
+- `rostree why <pkg> <pkg>` reported a dependency path for a package that does not
+  exist; the validation loop skipped both arguments when they were equal.
+- Global flags such as `--no-color` are accepted after the subcommand too
+  (`rostree tree rclcpp --no-color` used to be a usage error).
+- TUI: pressing `e` (expand all) or running a search no longer duplicates every
+  row of an already-expanded tree.
+- TUI: selecting a second package while a tree is still building no longer leaves
+  the app pointing at a tree it never rendered.
+- TUI: adding a source path while a tree is open now rescans, instead of leaving
+  the new packages invisible.
+- TUI: `Esc` leaves the dependents view when it was opened from the package list.
 - `--open` no longer goes through a shell on Windows: it uses `os.startfile`, so a
   path containing shell metacharacters cannot be misinterpreted. External tools
   (`dot`, `open`, `xdg-open`) are resolved to absolute paths before being executed.

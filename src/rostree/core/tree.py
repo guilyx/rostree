@@ -294,24 +294,11 @@ def build_dependency_tree(
         return _marker_node(root_package, NodeStatus.CYCLE)
 
     remaining_depth = None if max_depth is None else max_depth - _depth
-    expand_at: dict[str, int] | None = None
-    if collapse_repeats:
-        # Expand each package where it first appears (its shortest distance from the
-        # root). Every other occurrence becomes a one-line "see above" reference, so
-        # the tree stays proportional to the graph instead of to its path count.
-        graph = build_dependency_graph(
-            root_package,
-            max_depth=remaining_depth,
-            include_tags=tags,
-            index=index,
-        )
-        expand_at = graph.depths
-
     builder = _TreeBuilder(
         index=index,
         tags=tags,
         max_depth=remaining_depth,
-        expand_at=expand_at,
+        collapse_repeats=collapse_repeats,
         max_nodes=max_nodes,
         on_progress=on_progress,
     )
@@ -327,14 +314,14 @@ class _TreeBuilder:
         index: PackageIndex,
         tags: tuple[str, ...] | None,
         max_depth: int | None,
-        expand_at: dict[str, int] | None,
+        collapse_repeats: bool,
         max_nodes: int | None,
         on_progress: Callable[[int, str], None] | None,
     ) -> None:
         self.index = index
         self.tags = tags
         self.max_depth = max_depth
-        self.expand_at = expand_at
+        self.collapse_repeats = collapse_repeats
         self.max_nodes = max_nodes
         self.on_progress = on_progress
         self.expanded: set[str] = set()
@@ -368,7 +355,7 @@ class _TreeBuilder:
             self.expanded.add(name)
             return node
 
-        if not self._should_expand(name, depth):
+        if not self._should_expand(name):
             node.description = NodeStatus.REPEAT.marker
             node.status = NodeStatus.REPEAT
             return node
@@ -389,13 +376,19 @@ class _TreeBuilder:
         ]
         return node
 
-    def _should_expand(self, name: str, depth: int) -> bool:
-        """Expand a package once, where it first appears; elsewhere show a reference."""
-        if self.expand_at is None:
+    def _should_expand(self, name: str) -> bool:
+        """
+        Expand a package at the first place the tree *prints* it.
+
+        Traversal is depth-first and so is the rendered output, so keying off
+        first encounter is what makes "see above" true: every later occurrence
+        is, by construction, printed after the one that carries the subtree. A
+        package cut off by ``max_depth`` is not counted as expanded, so a later
+        occurrence with room to expand still gets the full subtree.
+        """
+        if not self.collapse_repeats:
             return True  # fully expanded tree: every occurrence gets its own subtree
-        if name in self.expanded:
-            return False
-        return depth <= self.expand_at.get(name, depth)
+        return name not in self.expanded
 
 
 def _marker_node(name: str, status: NodeStatus, *, path: str = "") -> DependencyNode:

@@ -180,8 +180,10 @@ class PackageIndex:
     entries: dict[str, PackageEntry] = field(default_factory=dict)
     source_roots: list[Path] = field(default_factory=list)
     prefixes: list[Path] = field(default_factory=list)
-    # Populated on demand by reverse_dependencies().
-    _reverse: dict[str, set[str]] | None = field(default=None, repr=False)
+    # Populated on demand by reverse_dependencies(), keyed by dependency tag set.
+    _reverse: dict[tuple[str, ...] | None, dict[str, set[str]]] = field(
+        default_factory=dict, repr=False
+    )
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -237,10 +239,12 @@ class PackageIndex:
         """
         Map each package name to the set of known packages that depend on it.
 
-        Requires parsing every manifest, so the result is cached on the index.
+        Requires parsing every manifest, so the result is cached on the index —
+        per tag set, since runtime-only and full dependency maps differ.
         """
-        if self._reverse is not None:
-            return self._reverse
+        cached = self._reverse.get(include_tags)
+        if cached is not None:
+            return cached
         reverse: dict[str, set[str]] = {}
         total = len(self.entries)
         for i, (name, entry) in enumerate(self.entries.items()):
@@ -250,7 +254,7 @@ class PackageIndex:
                     reverse.setdefault(dep, set()).add(name)
             if on_progress is not None:
                 on_progress(i + 1, total)
-        self._reverse = reverse
+        self._reverse[include_tags] = reverse
         return reverse
 
 

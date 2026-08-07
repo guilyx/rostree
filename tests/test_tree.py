@@ -442,19 +442,38 @@ class TestRepeatCollapsing:
         assert len(expanded) == 2
         assert not any(n.status is NodeStatus.REPEAT for n in tree.walk())
 
-    def test_expansion_happens_at_the_shallowest_position(self, tmp_path: Path) -> None:
-        """A package reachable directly and via a longer path expands on the short one."""
+    def test_expansion_happens_where_the_tree_first_prints_it(self, tmp_path: Path) -> None:
+        """The first *printed* occurrence carries the subtree, not the shallowest."""
         write_package(tmp_path, "shared", depends=["leaf"])
         write_package(tmp_path, "leaf")
         write_package(tmp_path, "middle", depends=["shared"])
         write_package(tmp_path, "top", depends=["middle", "shared"])
         with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
             tree = build_dependency_tree("top", extra_source_roots=[tmp_path])
-        direct = next(c for c in tree.children if c.name == "shared")
         middle = next(c for c in tree.children if c.name == "middle")
         nested = next(c for c in middle.children if c.name == "shared")
-        assert direct.children  # expanded here, at depth 1
-        assert nested.status is NodeStatus.REPEAT
+        direct = next(c for c in tree.children if c.name == "shared")
+        # middle comes first in top's dependency list, so shared expands there.
+        assert nested.children
+        assert direct.status is NodeStatus.REPEAT
+
+    def test_a_repeat_always_refers_to_something_printed_earlier(self, tmp_path: Path) -> None:
+        """The "see above" marker has to be true for every repeat in the tree."""
+        for layer in range(4):
+            for i in range(4):
+                deps = [f"p{layer - 1}_{j}" for j in range(4)] if layer else []
+                write_package(tmp_path, f"p{layer}_{i}", depends=deps)
+        write_package(tmp_path, "root_pkg", depends=[f"p3_{i}" for i in range(4)])
+        with mock.patch.dict(os.environ, _EMPTY_ENV, clear=False):
+            tree = build_dependency_tree("root_pkg", extra_source_roots=[tmp_path])
+
+        expanded_at: dict[str, int] = {}
+        for position, node in enumerate(tree.walk()):  # walk() is print order
+            if node.status is NodeStatus.REPEAT:
+                assert node.name in expanded_at, f"{node.name} claims 'above' but is not"
+                assert expanded_at[node.name] < position
+            elif node.status is NodeStatus.OK and node.children:
+                expanded_at.setdefault(node.name, position)
 
     def test_tree_stays_linear_in_the_number_of_packages(self, tmp_path: Path) -> None:
         """A layered graph must not blow up the way full expansion does."""
