@@ -14,6 +14,12 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
+from rostree.core.filters import (
+    DEP_TYPE_CHOICES,
+    FilterReport,
+    PackageFilter,
+    tags_for_dep_type,
+)
 from rostree.core.finder import (
     get_index,
     list_package_paths,
@@ -94,7 +100,7 @@ def _node_label(node: DependencyNode, *, show_desc: bool) -> Text:
     if node.version:
         label.append(f" {node.version}", style="cyan")
     if status is NodeStatus.TRUNCATED:
-        hidden = len(node.package_info.dependencies) if node.package_info else 0
+        hidden = node.hidden_children
         label.append(f"  … {hidden} more" if hidden else "  … depth limit", style="dim")
     elif status is not NodeStatus.OK:
         glyph, text, colour = _STATUS_LABEL[status]
@@ -302,12 +308,15 @@ def cmd_tree(args: argparse.Namespace) -> int:
         return 1
 
     full = getattr(args, "full", False)
+    report = FilterReport()
     tree = build_dependency_tree(
         args.package,
         max_depth=getattr(args, "depth", None),
-        runtime_only=getattr(args, "runtime", False),
+        include_tags=_dep_tags(args),
         collapse_repeats=not full,
         index=index,
+        package_filter=_package_filter(args),
+        report=report,
         max_nodes=getattr(args, "max_nodes", None),
     )
 
@@ -326,6 +335,7 @@ def cmd_tree(args: argparse.Namespace) -> int:
     )
     stats = tree_stats(tree)
     _err.print(f"\n[dim]{_summary_line(stats)}[/]")
+    _report_filtered(report)
     if stats["repeats"] and not full:
         _err.print(
             "[dim]Packages already shown above are summarised; "
@@ -362,11 +372,14 @@ def cmd_why(args: argparse.Namespace) -> int:
         _err.print(f"[yellow]{args.package} is its own starting point.[/]")
         return 1
 
+    report = FilterReport()
     graph = build_dependency_graph(
         args.package,
         max_depth=args.depth,
-        runtime_only=args.runtime,
+        include_tags=_dep_tags(args),
         index=index,
+        package_filter=_package_filter(args),
+        report=report,
     )
     paths = _shortest_paths(graph, args.package, args.dependency, limit=args.limit)
 
@@ -376,8 +389,9 @@ def cmd_why(args: argparse.Namespace) -> int:
         else:
             _out.print(
                 f"[yellow]{args.package}[/] does not depend on [yellow]{args.dependency}[/]"
-                + (" (runtime dependencies only)" if args.runtime else "")
+                + (" (runtime dependencies only)" if _dep_tags(args) else "")
             )
+            _report_filtered(report)
         return 1
 
     if args.json:
@@ -457,7 +471,7 @@ def cmd_rdeps(args: argparse.Namespace) -> int:
         _suggest(args.package, index)
         return 1
 
-    tags = ("depend", "exec_depend") if args.runtime else None
+    tags = _dep_tags(args)
     if _err.is_terminal and not args.json:
         with _err.status("[dim]Reading manifests…[/]", spinner="dots"):
             reverse = index.reverse_dependencies(include_tags=tags)
@@ -478,8 +492,10 @@ def cmd_rdeps(args: argparse.Namespace) -> int:
     else:
         names = direct
 
-    if args.workspace_only:
-        names = [n for n in names if (e := index.get(n)) and e.kind is not SourceKind.SYSTEM]
+    package_filter = _package_filter(args)
+    if not package_filter.is_noop:
+        report = FilterReport()
+        names = package_filter.filter_names(names, index, report)
 
     if args.json:
         print(json.dumps({"package": args.package, "dependents": names}, indent=2))
@@ -513,17 +529,28 @@ def cmd_check(args: argparse.Namespace) -> int:
             return 2
     else:
         roots = index.workspace_names()
+        roots = _package_filter(args).filter_names(roots, index)
         if not roots:
             _err.print(
                 "[yellow]No workspace packages found.[/] Source a workspace, or name packages explicitly."
             )
             return 2
 
-    graph = build_dependency_graph(roots, runtime_only=args.runtime, index=index)
+    graph = build_dependency_graph(
+        roots,
+        include_tags=_dep_tags(args),
+        index=index,
+        package_filter=_package_filter(args),
+    )
     cycles = graph.cycles()
     missing = sorted(graph.missing)
     if args.ignore_system:
         missing = [m for m in missing if "_" in m]
+
+    junit = getattr(args, "junit", None)
+    if junit:
+        _write_junit(Path(junit), roots, cycles, missing)
+        _err.print(f"[dim]JUnit report written to {junit}[/]")
 
     if args.json:
         print(
@@ -561,6 +588,165 @@ def cmd_check(args: argparse.Namespace) -> int:
         _out.print("[green]✓[/] Every dependency resolves to a package.")
 
     return 1 if (cycles or missing) else 0
+
+
+def _dependency_set(
+    package: str,
+    args: argparse.Namespace,
+    index: PackageIndex,
+) -> dict[str, str]:
+    """Every package reachable from ``package``, mapped to its version."""
+    graph = build_dependency_graph(
+        package,
+        max_depth=getattr(args, "depth", None),
+        include_tags=_dep_tags(args),
+        index=index,
+        package_filter=_package_filter(args),
+    )
+    versions = {name: info.version for name, info in graph.packages.items()}
+    for name in graph.missing:
+        versions[name] = ""
+    versions.pop(package, None)
+    return versions
+
+
+def _snapshot(package: str, versions: dict[str, str]) -> dict:
+    return {"package": package, "dependencies": versions}
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    """Compare two dependency sets and report what moved."""
+    index = _load_index(args)
+
+    if args.save:
+        if index.get(args.package) is None:
+            _err.print(f"[red]Package not found:[/] {args.package}")
+            _suggest(args.package, index)
+            return 1
+        versions = _dependency_set(args.package, args, index)
+        Path(args.save).write_text(json.dumps(_snapshot(args.package, versions), indent=2))
+        _err.print(f"[dim]Wrote a snapshot of {len(versions)} dependencies to {args.save}[/]")
+        return 0
+
+    if args.against:
+        try:
+            stored = json.loads(Path(args.against).read_text())
+            before_name = stored["package"]
+            before = dict(stored["dependencies"])
+        except (OSError, ValueError, KeyError) as exc:
+            _err.print(f"[red]Could not read snapshot {args.against}:[/] {exc}")
+            return 2
+    elif args.other:
+        if index.get(args.other) is None:
+            _err.print(f"[red]Package not found:[/] {args.other}")
+            _suggest(args.other, index)
+            return 1
+        before_name = args.other
+        before = _dependency_set(args.other, args, index)
+    else:
+        _err.print(
+            "[red]Nothing to compare against.[/] Pass a second package, --against or --save."
+        )
+        return 2
+
+    if index.get(args.package) is None:
+        _err.print(f"[red]Package not found:[/] {args.package}")
+        _suggest(args.package, index)
+        return 1
+    after = _dependency_set(args.package, args, index)
+
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(
+        name
+        for name in set(before) & set(after)
+        if before[name] != after[name] and before[name] and after[name]
+    )
+
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "before": before_name,
+                    "after": args.package,
+                    "added": added,
+                    "removed": removed,
+                    "changed": {n: {"from": before[n], "to": after[n]} for n in changed},
+                },
+                indent=2,
+            )
+        )
+        return 1 if (added or removed or changed) else 0
+
+    _out.print(
+        f"Comparing [bold]{before_name}[/] ({len(before)} deps) → "
+        f"[bold]{args.package}[/] ({len(after)} deps)\n"
+    )
+    if not (added or removed or changed):
+        _out.print("[green]✓[/] No difference.")
+        return 0
+
+    for title, names, style, sign in (
+        ("Added", added, "green", "+"),
+        ("Removed", removed, "red", "-"),
+    ):
+        if names:
+            _out.print(f"[{style}]{title} ({len(names)})[/]")
+            for name in names:
+                line = Text(f"  {sign} ", style=style)
+                line.append(name)
+                version = after.get(name) or before.get(name)
+                if version:
+                    line.append(f" {version}", style="cyan")
+                _out.print(line)
+            _out.print("")
+
+    if changed:
+        _out.print(f"[yellow]Changed ({len(changed)})[/]")
+        for name in changed:
+            line = Text("  ~ ", style="yellow")
+            line.append(name)
+            line.append(f"  {before[name]} → {after[name]}", style="cyan")
+            _out.print(line)
+    return 1
+
+
+def _write_junit(path: Path, roots: list[str], cycles: list[list[str]], missing: list[str]) -> None:
+    """Emit a JUnit report so CI dashboards can show what `check` found."""
+    from xml.etree.ElementTree import Element, ElementTree, SubElement
+
+    suite = Element(
+        "testsuite",
+        name="rostree check",
+        tests=str(2),
+        failures=str(bool(cycles) + bool(missing)),
+    )
+    cycle_case = SubElement(suite, "testcase", classname="rostree", name="no dependency cycles")
+    if cycles:
+        failure = SubElement(
+            cycle_case,
+            "failure",
+            message=f"{len(cycles)} dependency cycle(s)",
+            type="DependencyCycle",
+        )
+        failure.text = "\n".join(" -> ".join(cycle) for cycle in cycles)
+
+    missing_case = SubElement(
+        suite, "testcase", classname="rostree", name="all dependencies resolve"
+    )
+    if missing:
+        failure = SubElement(
+            missing_case,
+            "failure",
+            message=f"{len(missing)} unresolved dependency name(s)",
+            type="UnresolvedDependency",
+        )
+        failure.text = "\n".join(missing)
+
+    suite.set("hostname", "")
+    suite.set("package", ",".join(roots[:20]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ElementTree(suite).write(path, encoding="utf-8", xml_declaration=True)
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
@@ -841,17 +1027,19 @@ def cmd_graph(args: argparse.Namespace) -> int:
             graph = build_dependency_graph(
                 packages_to_graph,
                 max_depth=depth,
-                runtime_only=getattr(args, "runtime", False),
+                include_tags=_dep_tags(args),
                 extra_source_roots=extra_roots,
                 index=index,
+                package_filter=_package_filter(args),
             )
     else:
         graph = build_dependency_graph(
             packages_to_graph,
             max_depth=depth,
-            runtime_only=getattr(args, "runtime", False),
+            include_tags=_dep_tags(args),
             extra_source_roots=extra_roots,
             index=index,
+            package_filter=_package_filter(args),
         )
 
     if not graph.edges:
@@ -964,8 +1152,65 @@ def _add_runtime_arg(parser: argparse.ArgumentParser) -> None:
         "-r",
         "--runtime",
         action="store_true",
-        help="Only follow runtime dependencies (depend, exec_depend)",
+        help="Shorthand for --dep-type runtime (depend, exec_depend)",
     )
+    parser.add_argument(
+        "--dep-type",
+        choices=DEP_TYPE_CHOICES,
+        default=None,
+        metavar="KIND",
+        help="Which dependencies to follow: " + ", ".join(DEP_TYPE_CHOICES) + " (default: all)",
+    )
+
+
+def _add_filter_args(parser: argparse.ArgumentParser, *, short_workspace: bool = True) -> None:
+    """Scope flags shared by every command that walks the dependency graph."""
+    group = parser.add_argument_group("filtering")
+    # `graph` already spends -w on --workspace, so the short form is optional.
+    flags = ["-w", "--only-workspace"] if short_workspace else ["--only-workspace"]
+    group.add_argument(
+        *flags,
+        "--workspace-only",
+        dest="only_workspace",
+        action="store_true",
+        help="Ignore packages installed under /opt/ros",
+    )
+    group.add_argument(
+        "--include",
+        action="append",
+        metavar="GLOB",
+        help="Only packages whose name matches GLOB (repeatable, e.g. 'nav2_*')",
+    )
+    group.add_argument(
+        "--exclude",
+        action="append",
+        metavar="GLOB",
+        help="Drop packages whose name matches GLOB (repeatable)",
+    )
+
+
+def _package_filter(args: argparse.Namespace) -> PackageFilter:
+    return PackageFilter.from_args(
+        include=getattr(args, "include", None),
+        exclude=getattr(args, "exclude", None),
+        only_workspace=getattr(args, "only_workspace", False),
+    )
+
+
+def _dep_tags(args: argparse.Namespace) -> tuple[str, ...] | None:
+    """Dependency tags to traverse, honouring --dep-type and the -r shorthand."""
+    dep_type = getattr(args, "dep_type", None)
+    if dep_type:
+        return tags_for_dep_type(dep_type)
+    if getattr(args, "runtime", False):
+        return tags_for_dep_type("runtime")
+    return None
+
+
+def _report_filtered(report: FilterReport) -> None:
+    """Say what a filter held back, so the output never quietly lies."""
+    if report:
+        _err.print(f"[dim]{report.summary()}[/]")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1041,6 +1286,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_runtime_arg(tree_parser)
     _add_source_arg(tree_parser)
+    _add_filter_args(tree_parser)
     tree_parser.add_argument(
         "--full",
         action="store_true",
@@ -1085,6 +1331,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_runtime_arg(why_parser)
     _add_source_arg(why_parser)
+    _add_filter_args(why_parser)
     why_parser.add_argument("--json", action="store_true", help="Output as JSON")
     why_parser.set_defaults(func=cmd_why)
 
@@ -1098,14 +1345,9 @@ def main(argv: list[str] | None = None) -> int:
     rdeps_parser.add_argument(
         "-t", "--transitive", action="store_true", help="Include indirect dependents"
     )
-    rdeps_parser.add_argument(
-        "-w",
-        "--workspace-only",
-        action="store_true",
-        help="Exclude packages installed under /opt/ros",
-    )
     _add_runtime_arg(rdeps_parser)
     _add_source_arg(rdeps_parser)
+    _add_filter_args(rdeps_parser)
     rdeps_parser.add_argument("-v", "--verbose", action="store_true", help="Show package source")
     rdeps_parser.add_argument("--json", action="store_true", help="Output as JSON")
     rdeps_parser.set_defaults(func=cmd_rdeps)
@@ -1123,14 +1365,48 @@ def main(argv: list[str] | None = None) -> int:
         "packages", nargs="*", help="Packages to check (default: every workspace package)"
     )
     check_parser.add_argument(
+        "--junit",
+        metavar="FILE",
+        help="Also write a JUnit XML report, for CI dashboards",
+    )
+    check_parser.add_argument(
         "--ignore-system",
         action="store_true",
         help="Ignore unresolved names that look like rosdep keys",
     )
     _add_runtime_arg(check_parser)
     _add_source_arg(check_parser)
+    _add_filter_args(check_parser)
     check_parser.add_argument("--json", action="store_true", help="Output as JSON")
     check_parser.set_defaults(func=cmd_check)
+
+    # rostree diff
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two packages' dependencies, or a package against a snapshot",
+        description=(
+            "Show what a package gained, lost or bumped. Compare it against another "
+            "package, or against a snapshot taken earlier with --save."
+        ),
+    )
+    diff_parser.add_argument("package", help="Package to inspect")
+    diff_parser.add_argument(
+        "other", nargs="?", help="Second package to compare against (optional)"
+    )
+    diff_parser.add_argument(
+        "--save", metavar="FILE", help="Write this package's dependency set to FILE and exit"
+    )
+    diff_parser.add_argument(
+        "--against", metavar="FILE", help="Compare against a snapshot written by --save"
+    )
+    diff_parser.add_argument(
+        "-d", "--depth", type=int, default=None, help="Maximum depth (default: unlimited)"
+    )
+    _add_runtime_arg(diff_parser)
+    _add_source_arg(diff_parser)
+    _add_filter_args(diff_parser)
+    diff_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    diff_parser.set_defaults(func=cmd_diff)
 
     # rostree graph
     graph_parser = subparsers.add_parser(
@@ -1170,6 +1446,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_runtime_arg(graph_parser)
     _add_source_arg(graph_parser)
+    _add_filter_args(graph_parser, short_workspace=False)
     graph_parser.add_argument(
         "--hide-missing",
         action="store_true",

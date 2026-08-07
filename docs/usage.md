@@ -96,7 +96,14 @@ problems, so it can gate CI.
 rostree check                     # Every workspace package
 rostree check nav2_bringup        # Specific roots
 rostree check --ignore-system     # Ignore names that look like rosdep keys
+rostree check --junit report.xml  # Also write a JUnit report for CI
 rostree check --json
+```
+
+In CI:
+
+```yaml
+- run: rostree check --only-workspace --junit rostree.xml
 ```
 
 ### `rostree graph`
@@ -169,6 +176,56 @@ rostree graph rclpy -f mermaid | pbcopy  # Copy to clipboard
 ```
 
 ---
+
+## Scoping what you look at
+
+Every command that walks the dependency graph (`tree`, `graph`, `why`, `rdeps`,
+`check`, `diff`) takes the same scope flags. On a sourced ROS 2 machine most of
+what rostree can see belongs to the distro, so these are usually what you want:
+
+```bash
+rostree tree my_robot_bringup -w              # ignore /opt/ros packages
+rostree tree my_robot_bringup --include 'nav2_*'
+rostree tree my_robot_bringup --exclude '*_msgs' --exclude 'rosidl_*'
+rostree graph --only-workspace --render png   # graph just your own packages
+```
+
+- `-w` / `--only-workspace` drops anything installed under `/opt/ros`.
+- `--include GLOB` keeps only matching package names; repeat for several globs.
+- `--exclude GLOB` drops matching names. Excludes win over includes.
+- Patterns are shell globs matched against the package name, and are
+  case-sensitive.
+
+A filtered-out package is **neither shown nor followed**, so anything reachable
+only through it disappears too — that is what makes `--only-workspace` useful.
+Because that hides real edges, commands print a line saying what was held back.
+
+### Which dependencies to follow
+
+```bash
+rostree tree rclcpp --dep-type runtime   # depend + exec_depend  (same as -r)
+rostree tree rclcpp --dep-type build     # depend + build_depend + build_export_depend
+rostree tree rclcpp --dep-type test      # depend + test_depend
+rostree tree rclcpp --dep-type all       # everything (the default)
+```
+
+### `rostree diff`
+
+What did this package gain, lose or bump?
+
+```bash
+# Compare two packages
+rostree diff nav2_bringup nav2_route
+
+# Compare a package against its own past
+rostree diff my_robot_bringup --save deps.json
+#   ...rebuild, update, change a manifest...
+rostree diff my_robot_bringup --against deps.json
+```
+
+Exits non-zero when anything moved, so it works as a drift check in CI. `--json`
+gives `added` / `removed` / `changed` for scripting.
+
 
 ## TUI (Terminal UI)
 
