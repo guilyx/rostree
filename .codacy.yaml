@@ -29,6 +29,10 @@
 # silenced the subprocess call sites in cli.py but neither import — so the
 # writer was moved into its own module small enough to exempt honestly. It does
 # nothing but build and write a JUnit report, and Bandit still scans it.
+#
+# NOTE: unlike the `tests/**` entry, this one has not yet been observed to take
+# effect. Both spellings are listed while the form Codacy matches on for a single
+# file is established.
 engines:
   bandit:
     exclude_paths:
@@ -37,3 +41,4 @@ engines:
     exclude_paths:
       - 'tests/**'
       - 'src/rostree/core/junit.py'
+      - 'src/rostree/core/junit*'

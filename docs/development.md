@@ -90,11 +90,14 @@ be looked at rather than inheriting a blanket exemption. There are two:
 - **`core/junit.py`** — the only module that writes XML, and it never reads any.
   `defusedxml`, the replacement both tools recommend, exports no
   `Element`/`SubElement`/`ElementTree`, so there is nothing to switch to on the
-  writing side. `# nosemgrep` is not honoured on `import` statements (it silences
-  a call site but not an import), so the writer lives in its own module and
-  `.codacy.yaml` exempts that one file from Semgrep. Bandit still scans it, and
-  it is short enough to read in one sitting. The one place rostree *does* parse
-  XML, `core/parser.py`, uses defusedxml.
+  writing side. Bandit accepts the `# nosec B405` on the import; Semgrep does
+  not honour `# nosemgrep` on an `import` statement at all (the same comment
+  silences a call site fine), which is why the writer sits in a module of its
+  own — small enough that exempting the whole file is a proportionate thing to
+  do. The `.codacy.yaml` entry doing that is **not yet confirmed working**: the
+  `tests/**` exclusion above took effect immediately, this one did not, so the
+  pattern form Codacy wants for a single file still needs pinning down. The one
+  place rostree *does* parse XML, `core/parser.py`, uses defusedxml.
 
 Bandit logs a `nosec encountered, but no failed test` warning for a couple of
 them — it attributes multi-line statements to the wrong line — which is noise,
