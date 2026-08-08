@@ -20,6 +20,8 @@ classifiers = [
 dependencies = [
     "textual>=0.47.0",
     "rich>=13.0",
+    # Reading a package.xml is the one place rostree parses XML it did not write.
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]

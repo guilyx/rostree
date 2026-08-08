@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `package.xml` is now parsed with [defusedxml](https://pypi.org/project/defusedxml/)
+  (a new runtime dependency). `core/parser.py` is the only place rostree reads XML
+  it did not write, and a manifest is just a file in a workspace: one declaring
+  entities could previously make the parser expand them until it ran out of
+  memory. Such a manifest is now refused, which reports the package as unreadable
+  instead of hanging. A `DOCTYPE` that declares nothing still parses, so this
+  drops no package that used to work.
+
 - The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
   Exception: pass` blocks around `query_one` became
   `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded
@@ -21,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bandit runs in CI (`bandit -c pyproject.toml -r src tests`) and is in the `dev`
   extra, so the security scan that gates pull requests can be reproduced locally.
 - `.codacy.yaml` records which rules are switched off for the test suite, and why.
-  Accepted findings under `src/` carry an inline `# nosec <id>` with its reason.
+  Accepted findings under `src/` carry an inline suppression with its reason.
   See [development.md](docs/development.md#static-analysis).
 
 ## [0.4.0] - 2026-08-07

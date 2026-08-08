@@ -54,22 +54,48 @@ bandit -c pyproject.toml -r src tests
 ```
 
 Pull requests are also scanned by [Codacy](https://www.codacy.com/), which runs
-Bandit in its own UI. The same run happens in `ci.yml` so a security finding
-lands next to the lint failures instead of only in a dashboard, and so you can
-reproduce it before pushing. `.codacy.yaml` and `[tool.bandit]` are kept in step
-with each other; changing one without the other is how the two disagree.
+**two** tools whose findings look alike but are suppressed differently:
+
+| Tool | Suppressed by | Reported as |
+|------|---------------|-------------|
+| Bandit | `# nosec B123` | Low / Medium / High |
+| Semgrep | `# nosemgrep` | Critical |
+
+A `# nosec` does nothing to a Semgrep finding, and vice versa, so the few lines
+that trip both carry both. Bandit reads everything after `nosec` as a list of
+rule IDs, which is why the annotations end `# nosemgrep  # nosec B123` and the
+reasoning sits on the line above rather than trailing it.
+
+Bandit also runs in `ci.yml` and pre-commit, so a finding lands next to the lint
+failures instead of only in a dashboard:
+
+```bash
+bandit -c pyproject.toml -r src tests
+```
+
+`.codacy.yaml` and `[tool.bandit]` are kept in step with each other; changing one
+without the other is how the two disagree.
 
 Two rules are switched off for `tests/` only:
 
 - **B101 (`assert` used)** — every pytest assertion trips it. The rule exists
   because `python -O` strips asserts, which is not how a test suite runs. There
   are no asserts under `src/`.
-- **B405 / B314 (XML)** — `tests/test_cli_commands.py` reads back a JUnit report
-  that the same test wrote to a `tmp_path` moments earlier.
+- **The XML rules** — `tests/test_cli_commands.py` reads back a JUnit report that
+  the same test wrote to a `tmp_path` moments earlier.
 
-Everything under `src/` is still scanned. The accepted findings there carry an
-inline `# nosec <id>` with the reason on the same line, so a *new* finding on
-that line still has to be looked at rather than inheriting a blanket exemption.
+Everything under `src/` is still scanned, and the accepted findings there carry
+their reason next to them, so a *new* finding on one of those lines still has to
+be looked at rather than inheriting a blanket exemption. There are two:
+
+- **`cli.py`'s `xml.etree` import** — `_write_junit` writes a report and never
+  reads one. `defusedxml`, the replacement both tools recommend, exports no
+  `Element`/`SubElement`/`ElementTree`, so there is nothing to switch to on the
+  writing side. The one place rostree *does* parse XML, `core/parser.py`, uses
+  defusedxml.
+- **The `subprocess` calls** — fixed argv, absolute path from `shutil.which`, no
+  shell anywhere.
+
 Bandit logs a `nosec encountered, but no failed test` warning for a couple of
 them — it attributes multi-line statements to the wrong line — which is noise,
 not a stale suppression.

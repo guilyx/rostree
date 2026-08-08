@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET  # see the note below  # nosec B405
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# On the stdlib XML parser
-# -----------------------
-# Security scanners flag `xml.etree` on sight. What it is actually exposed to
-# here is worth stating, because the answer is not "nothing":
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import ParseError
+from defusedxml.ElementTree import parse as parse_xml
+
+# This is the only place in rostree that *reads* XML, so it is the only place
+# where the parser's own behaviour is a security question.
 #
-#   * CPython's ElementTree does not resolve external entities and does not
-#     fetch DTDs, so XXE and SSRF do not apply (see the XML vulnerability table
-#     in the Python docs).
-#   * It *is* susceptible to entity-expansion denial of service ("billion
-#     laughs"). A hand-crafted package.xml could hang rostree.
-#
-# The files parsed here are the package.xml manifests already sitting on your
-# AMENT_PREFIX_PATH or in your workspace's src/ tree. Anyone able to plant one
-# of those can also edit the CMakeLists.txt and setup.py next to it, so they own
-# your build long before rostree reads anything. Hardening this against a DoS
-# would mean a defusedxml dependency for a threat that is strictly weaker than
-# ones already present, so the stdlib parser stays.
+# CPython's `xml.etree` resolves no external entities and fetches no DTDs, so
+# XXE and SSRF never applied here. It can, however, be made to expand entities
+# until it runs out of memory, and a package.xml is just a file sitting in a
+# workspace. defusedxml refuses a manifest that declares a DTD or an entity at
+# all, which turns that from a hang into a skipped package — the same outcome as
+# any other manifest rostree cannot read.
 
 # Tags that declare dependency on another ROS package (we collect these for the tree).
 DEPENDENCY_TAGS = (
@@ -162,8 +157,10 @@ def _parse_package_xml_uncached(
     if not path.exists() or not path.is_file():
         return None
     try:
-        tree = ET.parse(path)  # a local manifest, see the note at the imports  # nosec B314
-    except (ET.ParseError, OSError):
+        tree = parse_xml(path)
+    except (ParseError, DefusedXmlException, OSError):
+        # DefusedXmlException covers a manifest carrying a DTD or entity
+        # declaration: unreadable, like any other malformed package.xml.
         return None
     root = tree.getroot()
     if root.tag != "package":
