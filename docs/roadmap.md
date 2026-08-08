@@ -1,6 +1,6 @@
 # rostree Roadmap
 
-Last reviewed after **v0.3.0** shipped. The original roadmap came out of
+Last reviewed after **v0.4.0** shipped. The original roadmap came out of
 [the code review](./review.md); this version records what shipped, what was
 dropped and why, and what is worth doing next.
 
@@ -54,10 +54,14 @@ workspace.
 
 ---
 
-## v0.4.0 — make it pleasant on a real workspace *(in progress)*
+## Shipped in v0.4.0
 
-The theme is **scoping**. On a sourced ROS 2 machine most of what rostree prints
-belongs to the distro, not to you, and there is currently no way to say so.
+The theme was **scoping**. On a sourced ROS 2 machine most of what rostree prints
+belongs to the distro, not to you, and there was no way to say so.
+
+4.1 and 4.2 shipped whole; 4.3 shipped except the composite Action. 4.4 and 4.5
+did not start and have moved to v0.5.0 below rather than being left here looking
+like part of a finished release.
 
 ### 4.1 Scope and filtering — ✅ shipped
 - [x] `--only-workspace` — exclude packages installed under `/opt/ros`
@@ -72,23 +76,33 @@ belongs to the distro, not to you, and there is currently no way to say so.
 - [x] `rostree diff --save FILE` / `--against FILE` — capture now, compare after a rebuild
 - [x] Report added / removed / version-changed, and exit non-zero on drift
 
-### 4.3 CI integration — *partly shipped*
+### 4.3 CI integration — ✅ mostly shipped
 - [x] `rostree check --junit FILE` for CI dashboards
-- [ ] A composite GitHub Action wrapping `rostree check`
 - [x] Document the pattern in `docs/usage.md`
+- [ ] A composite GitHub Action wrapping `rostree check` — carried to v0.5.0
 
-### 4.4 Configuration file
-- [ ] `[tool.rostree]` in `pyproject.toml` and `.rostreerc` (TOML)
-- [ ] Defaults for depth, dependency scope and filters
-- [ ] CLI arguments always override the file
-
-### 4.5 Errors and diagnostics
-- [ ] `rostree.exceptions` with `PackageNotFoundError`, `ManifestError`
-- [ ] Optional logging behind `--debug`
+### 4.4 Static analysis, unplanned
+Not on the original list. Codacy reported 75 issues against the v0.4.0 branch and
+settling them turned up two things worth fixing rather than silencing, so the
+work is recorded here:
+- [x] `core/parser.py` parses with defusedxml — a manifest declaring entities is
+      refused instead of expanding until memory runs out
+- [x] The TUI's `query_one` guards narrowed from bare `Exception` to
+      `QueryError`/`ScreenStackError`, so bugs inside them stop disappearing
+- [x] Bandit in CI, pre-commit and the `dev` extra, so the gate is reproducible
+      locally instead of living only in a dashboard
 
 ---
 
-## Later: v0.5.0 — confidence
+## Next: v0.5.0 — confidence
+
+### 5.0 Carried over from v0.4.0
+- [ ] A composite GitHub Action wrapping `rostree check`
+- [ ] Configuration file: `[tool.rostree]` in `pyproject.toml` and `.rostreerc`
+      (TOML), defaults for depth, dependency scope and filters, CLI arguments
+      always overriding the file
+- [ ] `rostree.exceptions` with `PackageNotFoundError`, `ManifestError`, and
+      optional logging behind `--debug`
 
 ### 5.1 Integration tests against real ROS 2
 - [ ] Run the suite in a `ros:jazzy` container in CI
@@ -103,12 +117,15 @@ code for every release so far, and no fixture-based test could have caught it.
 - [ ] Include unresolved rosdep keys as external references
 
 ### 5.3 Split the CLI module
-- [ ] `cli.py` is ~1,200 lines; split into `cli/commands/*.py`
+- [x] `core/junit.py` — carved out in v0.4.0 because the security scanners needed
+      one place to be told the JUnit writer only ever *writes* XML
+- [ ] `cli.py` is still ~1,470 lines; split the rest into `cli/commands/*.py`
 - [ ] Keep `rostree.cli` re-exporting the current names — a lot of tests and
       downstream code import from it
 
-Deliberately last: pure churn with no user-visible benefit, so it should follow
-the features rather than block them.
+Deliberately late: mostly churn with no user-visible benefit, so it should follow
+the features rather than block them. The one piece done so far was pulled out for
+a concrete reason, which is the bar the rest should meet too.
 
 ### 5.4 Distribution
 - [ ] Publish to the ROS 2 package index

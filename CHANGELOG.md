@@ -7,38 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- `package.xml` is now parsed with [defusedxml](https://pypi.org/project/defusedxml/)
-  (a new runtime dependency). `core/parser.py` is the only place rostree reads XML
-  it did not write, and a manifest is just a file in a workspace: one declaring
-  entities could previously make the parser expand them until it ran out of
-  memory. Such a manifest is now refused, which reports the package as unreadable
-  instead of hanging. A `DOCTYPE` that declares nothing still parses, so this
-  drops no package that used to work.
-
-- The JUnit writer moved out of `cli.py` into `core/junit.py`. It is the only
-  code in rostree that writes XML and never reads any, and keeping it separate
-  lets the security scanners be told that once, in one place, instead of on
-  every line of a 1,300-line module.
-- The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
-  Exception: pass` blocks around `query_one` became
-  `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded
-  block raises instead of disappearing. The two guards that are deliberately
-  broad — best-effort tree expansion and collapse, which a background rebuild can
-  interrupt — say so in a comment.
-
-### Added
-
-- Bandit runs in CI (`bandit -c pyproject.toml -r src tests`) and is in the `dev`
-  extra, so the security scan that gates pull requests can be reproduced locally.
-- `.codacy.yaml` records which rules are switched off for the test suite, and why.
-  Accepted findings under `src/` carry an inline suppression with its reason, and
-  [development.md](docs/development.md#static-analysis) writes down where those
-  comments have to sit — which is less obvious than it sounds, and is what made
-  this take four attempts.
-
-## [0.4.0] - 2026-08-07
+## [0.4.0] - 2026-08-08
 
 v0.3.0 made big trees fast. This one makes them *yours*: on a sourced ROS 2
 machine most of what rostree can see belongs to the distro, and until now there
@@ -66,11 +35,37 @@ was no way to say so.
   is not showing, so `… N more` never promises more than the tree would print.
 - `build_dependency_tree()` and `build_dependency_graph()` accept `package_filter`,
   `report` and (on the tree) `include_tags`.
+- Bandit runs in CI and pre-commit and is in the `dev` extra, so
+  `bandit -c pyproject.toml -r src tests` reproduces the security scan that gates
+  pull requests instead of it existing only in a dashboard. `.codacy.yaml` records
+  which rules are switched off for the test suite and why; accepted findings under
+  `src/` carry an inline suppression with its reason, and
+  [development.md](docs/development.md#static-analysis) writes down where those
+  comments have to sit, which is less obvious than it sounds.
 
 ### Changed
 
 - `rdeps --workspace-only` is now `--only-workspace`; the old spelling still works.
+- The JUnit writer moved out of `cli.py` into `core/junit.py`. It is the only code
+  in rostree that writes XML and never reads any, and keeping it separate lets that
+  argument be made once, at the top of a short file, instead of on every line of a
+  1,300-line module.
+- The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
+  Exception: pass` blocks around `query_one` became
+  `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded
+  block raises instead of disappearing. The two guards that are deliberately
+  broad — best-effort tree expansion and collapse, which a background rebuild can
+  interrupt — say so in a comment.
 
+### Security
+
+- `package.xml` is now parsed with [defusedxml](https://pypi.org/project/defusedxml/),
+  a new runtime dependency. `core/parser.py` is the only place rostree reads XML it
+  did not write, and a manifest is just a file in a workspace: one declaring
+  entities could previously make the parser expand them until it ran out of memory.
+  Such a manifest is now refused, which reports the package as unreadable instead
+  of hanging. A `DOCTYPE` that declares nothing still parses, so this drops no
+  package that used to work.
 
 ## [0.3.0] - 2026-08-07
 
