@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.css.query import QueryError
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, LoadingIndicator, Static, Tree
 from textual.widgets.tree import TreeNode
@@ -16,6 +18,13 @@ from textual.widgets.tree import TreeNode
 from rostree.api import build_tree, get_index
 from rostree.core.index import PackageEntry, PackageIndex, SourceKind
 from rostree.core.tree import NodeStatus, tree_stats
+
+# A widget lookup can legitimately miss. The TUI updates widgets from worker
+# threads and from key handlers, so a query can run before the widget is mounted
+# or after the screen has gone away, and neither is an error worth showing.
+# These are the only failures the guards below swallow — a bug *inside* a guarded
+# block still raises, which a bare `except Exception` would have hidden.
+WIDGET_UNAVAILABLE = (QueryError, ScreenStackError)
 
 # Welcome banner: ROSTREE (all lines must be same length for proper centering)
 WELCOME_BANNER = """\
@@ -185,11 +194,13 @@ def _expand_to_depth(tn: TreeNode, depth: int, current: int = 0) -> None:
     """Expand tree nodes up to given depth (0 = root only)."""
     if current >= depth:
         return
+    # Deliberately broad: a background rebuild can detach a node part-way through
+    # this walk. A partially expanded tree is fine; a crashed UI is not.
     try:
         tn.expand()
         for child in tn.children:
             _expand_to_depth(child, depth, current + 1)
-    except Exception:
+    except Exception:  # best-effort expansion, see above  # nosec B110
         pass
 
 
@@ -502,10 +513,8 @@ class DepTreeApp(App[None]):
         if self._packages_cache is not None or self._packages_loading:
             return  # Already loaded or loading
         self._packages_loading = True
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#welcome_loading").add_class("loading")
-        except Exception:
-            pass
         self.run_worker(self._scan_packages_worker, thread=True, exclusive=False)
 
     def _scan_packages_worker(self) -> None:
@@ -538,7 +547,7 @@ class DepTreeApp(App[None]):
 
     def _update_loading_status(self) -> None:
         """Update loading indicator status."""
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             loading_container = self.query_one("#welcome_loading")
             loading_text = self.query_one("#loading_text", Static)
             if self._packages_cache is not None:
@@ -551,19 +560,15 @@ class DepTreeApp(App[None]):
                 )
             elif self._packages_error:
                 loading_text.update(f"[red]Error: {self._packages_error}[/]")
-        except Exception:
-            pass
 
     def action_start_main(self) -> None:
         """Transition from welcome screen to main view."""
         if self._main_started:
             return
         self._main_started = True
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#welcome_container").styles.display = "none"
             self.query_one("#main_container").styles.display = "block"
-        except Exception:
-            pass
         if self._root_package:
             self._load_tree(self._root_package)
         else:
@@ -587,10 +592,8 @@ class DepTreeApp(App[None]):
 
     def _set_status(self, text: str) -> None:
         self.status_text = text
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#status_bar", Static).update(text)
-        except Exception:
-            pass
 
     def _mode_suffix(self) -> str:
         scope = "runtime deps" if self._runtime_only else "all deps"
@@ -598,10 +601,8 @@ class DepTreeApp(App[None]):
 
     def _load_main_view(self) -> None:
         """Show every known package, grouped by source and honouring the filter."""
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#filter_input").add_class("visible")
-        except Exception:
-            pass
         try:
             tree = self.query_one("#dep_tree", Tree)
             self._clear_tree(tree)
@@ -687,10 +688,8 @@ class DepTreeApp(App[None]):
         focused = self.focused
         if not force and focused is not None and getattr(focused, "id", None) == "filter_input":
             return
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#dep_tree", Tree).focus()
-        except Exception:
-            pass
 
     # ----------------------------------------------------------- dependency tree
 
@@ -703,10 +702,8 @@ class DepTreeApp(App[None]):
         self._root_package = root_package
         self._search_matches = []
         self._building = True
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#filter_input").remove_class("visible")
-        except Exception:
-            pass
         tree = self.query_one("#dep_tree", Tree)
         self._clear_tree(tree)
         tree.root.label = f"[{COLOR_HEADER}]{root_package}[/] [dim]building…[/]"
@@ -811,10 +808,8 @@ class DepTreeApp(App[None]):
 
     def _set_details(self, text: str) -> None:
         self.details_text = text
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             self.query_one("#details", Static).update(text)
-        except Exception:
-            pass
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         node = event.node.data
@@ -834,12 +829,10 @@ class DepTreeApp(App[None]):
         if self._root_package:
             self.push_screen(SearchScreen(), self._on_search_done)
             return
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             filter_input = self.query_one("#filter_input", Input)
             filter_input.add_class("visible")
             filter_input.focus()
-        except Exception:
-            pass
 
     FILTER_DEBOUNCE = 0.12
 
@@ -880,10 +873,8 @@ class DepTreeApp(App[None]):
             return
         if self._filter and not self._root_package:
             self._filter = ""
-            try:
+            with suppress(*WIDGET_UNAVAILABLE):
                 self.query_one("#filter_input", Input).value = ""
-            except Exception:
-                pass
             self._load_main_view()
             return
         if not self._root_package:
@@ -916,10 +907,12 @@ class DepTreeApp(App[None]):
 
     def action_collapse_all(self) -> None:
         tree = self.query_one("#dep_tree", Tree)
+        # Same reasoning as _expand_to_depth: collapsing walks the whole widget
+        # tree, which a background rebuild may be rewriting underneath us.
         try:
             tree.root.collapse_all()
             tree.root.expand()
-        except Exception:
+        except Exception:  # best-effort collapse, see above  # nosec B110
             pass
 
     def action_toggle_scope(self) -> None:
@@ -1094,11 +1087,9 @@ class DepTreeApp(App[None]):
     def action_toggle_details(self) -> None:
         """Toggle visibility of the details panel."""
         self._details_visible = not self._details_visible
-        try:
+        with suppress(*WIDGET_UNAVAILABLE):
             details = self.query_one("#details", Static)
             details.set_class(not self._details_visible, "hidden")
-        except Exception:
-            pass
 
     def action_quit(self) -> None:
         self.exit()

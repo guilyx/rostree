@@ -29,7 +29,7 @@ pip install -e ".[dev]"
 # or: uv pip install -e ".[dev]"
 ```
 
-Dev extras: pytest, pytest-cov, ruff, black.
+Dev extras: pytest, pytest-cov, ruff, black, bandit.
 
 ## Pre-commit
 
@@ -47,9 +47,36 @@ pre-commit install --hook-type commit-msg
 - **Black** — Format (line-length 100).
 - **conventional-pre-commit** — Commit message prefix check (commit-msg hook).
 
+## Static analysis
+
+```bash
+bandit -c pyproject.toml -r src tests
+```
+
+Pull requests are also scanned by [Codacy](https://www.codacy.com/), which runs
+Bandit in its own UI. The same run happens in `ci.yml` so a security finding
+lands next to the lint failures instead of only in a dashboard, and so you can
+reproduce it before pushing. `.codacy.yaml` and `[tool.bandit]` are kept in step
+with each other; changing one without the other is how the two disagree.
+
+Two rules are switched off for `tests/` only:
+
+- **B101 (`assert` used)** — every pytest assertion trips it. The rule exists
+  because `python -O` strips asserts, which is not how a test suite runs. There
+  are no asserts under `src/`.
+- **B405 / B314 (XML)** — `tests/test_cli_commands.py` reads back a JUnit report
+  that the same test wrote to a `tmp_path` moments earlier.
+
+Everything under `src/` is still scanned. The accepted findings there carry an
+inline `# nosec <id>` with the reason on the same line, so a *new* finding on
+that line still has to be looked at rather than inheriting a blanket exemption.
+Bandit logs a `nosec encountered, but no failed test` warning for a couple of
+them — it attributes multi-line statements to the wrong line — which is noise,
+not a stale suppression.
+
 ## CI
 
-- **ci.yml** — lint (ruff, black) plus pytest with coverage on Python 3.10–3.12.
+- **ci.yml** — lint (ruff, black, bandit) plus pytest with coverage on Python 3.10–3.12.
 - **publish.yml** — Build and publish to PyPI on release (Trusted Publishing).
 
 CI runs on every push/PR to main/master.

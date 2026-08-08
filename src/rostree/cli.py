@@ -7,10 +7,14 @@ import json
 import os
 import platform
 import shutil
-import subprocess
+import subprocess  # only ever called with a list and an absolute path  # nosec B404
 import sys
 from pathlib import Path
-from xml.etree.ElementTree import Element, ElementTree, SubElement
+from xml.etree.ElementTree import (  # writes XML, never parses it  # nosec B405
+    Element,
+    ElementTree,
+    SubElement,
+)
 
 from rich.console import Console
 from rich.text import Text
@@ -936,7 +940,7 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
         return False
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # fixed argv, resolved path, no shell  # nosec B603
             [_resolve_tool("dot"), f"-T{format}", "-o", str(output_path)],
             input=dot_content,
             capture_output=True,
@@ -967,11 +971,11 @@ def _open_file(path: Path) -> bool:
         if system == "Windows":
             # os.startfile is the documented way to do this on Windows and takes
             # no shell, so a path with shell metacharacters cannot be misread.
-            os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
+            os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606  # nosec B606
         elif system == "Darwin":  # macOS
-            subprocess.run([_resolve_tool("open"), str(path)], check=True)
+            subprocess.run([_resolve_tool("open"), str(path)], check=True)  # nosec B603
         else:  # Linux and others
-            subprocess.run([_resolve_tool("xdg-open"), str(path)], check=True)
+            subprocess.run([_resolve_tool("xdg-open"), str(path)], check=True)  # nosec B603
         return True
     except Exception as e:
         print(f"Could not open file: {e}", file=sys.stderr)

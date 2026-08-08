@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
+  Exception: pass` blocks around `query_one` became
+  `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded
+  block raises instead of disappearing. The two guards that are deliberately
+  broad — best-effort tree expansion and collapse, which a background rebuild can
+  interrupt — say so in a comment.
+
+### Added
+
+- Bandit runs in CI (`bandit -c pyproject.toml -r src tests`) and is in the `dev`
+  extra, so the security scan that gates pull requests can be reproduced locally.
+- `.codacy.yaml` records which rules are switched off for the test suite, and why.
+  Accepted findings under `src/` carry an inline `# nosec <id>` with its reason.
+  See [development.md](docs/development.md#static-analysis).
+
 ## [0.4.0] - 2026-08-07
 
 v0.3.0 made big trees fast. This one makes them *yours*: on a sourced ROS 2

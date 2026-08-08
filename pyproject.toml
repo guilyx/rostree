@@ -28,6 +28,7 @@ viz = [
     "matplotlib>=3.7",
 ]
 dev = [
+    "bandit[toml]==1.9.4",
     "black==25.1.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -65,6 +66,13 @@ extend-exclude = '''
   | \.venv
 )/
 '''
+
+[tool.bandit]
+# Mirrors .codacy.yaml, so `bandit -c pyproject.toml -r src tests` locally and in
+# CI reports what the Codacy gate reports. No rules are skipped globally: the
+# handful of accepted findings under src/ carry an inline `# nosec <id>` with the
+# reason, so a new one still has to be looked at rather than inherited.
+exclude_dirs = ["tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

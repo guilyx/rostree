@@ -439,7 +439,12 @@ class TestFilterFlags:
 
 
 class TestJUnitReport:
-    """The JUnit report is written by hand, so escaping is worth pinning down."""
+    """
+    The report has to survive package names that are arbitrary text.
+
+    Each test reads back a file it wrote to ``tmp_path`` a few lines earlier;
+    parsing is the assertion, since malformed XML raises rather than compares.
+    """
 
     def test_report_is_well_formed_xml(self, tmp_path: Path) -> None:
         write_package(tmp_path, "app", depends=["missing_key"])

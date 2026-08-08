@@ -1,0 +1,29 @@
+---
+# Codacy analysis configuration.
+#
+# This file narrows *security* scanning only. Style, complexity, duplication and
+# coverage analysis still cover the whole repository, and everything under src/
+# is still scanned by every tool — the two suppressions there are inline, on the
+# line, with the reason next to them.
+#
+# Why the test suite is excluded from the security tools:
+#
+#   * Bandit B101 (`assert` used) fires on every assertion pytest makes. The
+#     warning exists because `python -O` strips asserts, which matters in code
+#     that ships and does not in a suite that is never run that way. There are
+#     727 asserts under tests/ and none under src/, so this hides no finding.
+#
+#   * The XML rules (B405 import / B314 parse) fire on
+#     tests/test_cli_commands.py, which reads back a JUnit report the same test
+#     wrote to a tmp_path three lines earlier. Parsing a file you just created
+#     is not untrusted input; parsing it is the assertion.
+#
+# Keep this in step with [tool.bandit] in pyproject.toml, which is what the
+# `bandit` job in .github/workflows/ci.yml runs.
+engines:
+  bandit:
+    exclude_paths:
+      - 'tests/**'
+  semgrep:
+    exclude_paths:
+      - 'tests/**'

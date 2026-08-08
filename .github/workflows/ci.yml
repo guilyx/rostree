@@ -26,6 +26,12 @@ jobs:
       - name: Black
         run: black --check src tests
 
+      # Codacy runs Bandit on every pull request, but only in its own UI. Running
+      # it here means a finding shows up in the same place as a lint failure, and
+      # `bandit -c pyproject.toml -r src tests` reproduces it locally.
+      - name: Bandit
+        run: bandit -c pyproject.toml -r src tests
+
   test:
     runs-on: ubuntu-latest
     strategy:
