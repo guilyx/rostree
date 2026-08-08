@@ -932,13 +932,13 @@ def _open_file(path: Path) -> bool:
             # no shell, so a path with shell metacharacters cannot be misread.
             os.startfile(str(path))  # type: ignore[attr-defined]  # nosemgrep  # nosec B606
         elif system == "Darwin":  # macOS
-            subprocess.run(
+            subprocess.run(  # nosemgrep  # nosec B603
                 [_resolve_tool("open"), str(path)], check=True
-            )  # nosemgrep  # nosec B603
+            )
         else:  # Linux and others
-            subprocess.run(
+            subprocess.run(  # nosemgrep  # nosec B603
                 [_resolve_tool("xdg-open"), str(path)], check=True
-            )  # nosemgrep  # nosec B603
+            )
         return True
     except Exception as e:
         print(f"Could not open file: {e}", file=sys.stderr)

@@ -33,8 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bandit runs in CI (`bandit -c pyproject.toml -r src tests`) and is in the `dev`
   extra, so the security scan that gates pull requests can be reproduced locally.
 - `.codacy.yaml` records which rules are switched off for the test suite, and why.
-  Accepted findings under `src/` carry an inline suppression with its reason.
-  See [development.md](docs/development.md#static-analysis).
+  Accepted findings under `src/` carry an inline suppression with its reason, and
+  [development.md](docs/development.md#static-analysis) writes down where those
+  comments have to sit — which is less obvious than it sounds, and is what made
+  this take four attempts.
 
 ## [0.4.0] - 2026-08-07
 

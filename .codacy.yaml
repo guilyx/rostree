@@ -1,44 +1,26 @@
 ---
 # Codacy analysis configuration.
 #
-# This file narrows *security* scanning only. Style, complexity, duplication and
-# coverage analysis still cover the whole repository, and everything under src/
-# is still scanned by every tool — the two suppressions there are inline, on the
-# line, with the reason next to them.
+# Codacy runs two security tools on this repository, and they are silenced by
+# different means:
 #
-# Why the test suite is excluded from the security tools:
+#   * Bandit    — `# nosec B123` on the line, or exclude_paths below.
+#   * Semgrep   — `# nosemgrep` on the line, or the line above it.
 #
-#   * Bandit B101 (`assert` used) fires on every assertion pytest makes. The
-#     warning exists because `python -O` strips asserts, which matters in code
-#     that ships and does not in a suite that is never run that way. There are
-#     727 asserts under tests/ and none under src/, so this hides no finding.
+# What we learned the hard way, recorded so nobody repeats it: an
+# `engines.semgrep.exclude_paths` block is **not** honoured — findings under a
+# path listed there were still reported, while the identical `engines.bandit`
+# block took effect on the first run. Semgrep is therefore handled in the source,
+# never here.
 #
-#   * The XML rules (B405 import / B314 parse) fire on
-#     tests/test_cli_commands.py, which reads back a JUnit report the same test
-#     wrote to a tmp_path three lines earlier. Parsing a file you just created
-#     is not untrusted input; parsing it is the assertion.
+# `tests/**` is excluded from Bandit for one rule's sake, B101 (`assert` used).
+# Every pytest assertion trips it; the warning exists because `python -O` strips
+# asserts, which is not how a test suite runs. There are 727 asserts under
+# tests/ and none under src/, so this hides nothing.
 #
 # Keep this in step with [tool.bandit] in pyproject.toml, which is what the
 # `bandit` job in .github/workflows/ci.yml runs.
-#
-# core/junit.py is excluded from Semgrep for one specific reason. Semgrep's XML
-# rules fire on the `xml.etree` import and tell you to use defusedxml. That
-# advice is about parsing hostile input; defusedxml exports no Element,
-# SubElement or ElementTree, so there is nothing to switch to on the writing
-# side. `# nosemgrep` turned out not to be honoured on import statements — it
-# silenced the subprocess call sites in cli.py but neither import — so the
-# writer was moved into its own module small enough to exempt honestly. It does
-# nothing but build and write a JUnit report, and Bandit still scans it.
-#
-# NOTE: unlike the `tests/**` entry, this one has not yet been observed to take
-# effect. Both spellings are listed while the form Codacy matches on for a single
-# file is established.
 engines:
   bandit:
     exclude_paths:
       - 'tests/**'
-  semgrep:
-    exclude_paths:
-      - 'tests/**'
-      - 'src/rostree/core/junit.py'
-      - 'src/rostree/core/junit*'

@@ -59,9 +59,21 @@ Pull requests are scanned by [Codacy](https://www.codacy.com/), which runs
 | Semgrep | `# nosemgrep` | Critical |
 
 A `# nosec` does nothing to a Semgrep finding, and vice versa, so the few lines
-that trip both carry both. Bandit reads everything after `nosec` as a list of
-rule IDs, which is why the annotations end `# nosemgrep  # nosec B123` and the
-reasoning sits on the line above rather than trailing it.
+that trip both carry both. Three things about placement, each of which cost a
+CI round to learn:
+
+1. Bandit reads everything after `nosec` as a list of rule IDs, so the reasoning
+   goes on the line above, not trailing it, and `nosec` comes last.
+2. Both comments must sit on the line the tool *reports*. Adding them can push a
+   line past 100 characters, at which point black splits the call and strands the
+   comment on the closing paren — where it silences nothing. Put it on the
+   `subprocess.run(` line and let the arguments wrap.
+3. Semgrep does not accept a trailing `# nosemgrep` on an `import`; it has to go
+   on the line before.
+
+`.codacy.yaml` carries a fourth: an `engines.semgrep.exclude_paths` block is not
+honoured at all, though the identical `engines.bandit` one is. Semgrep is
+therefore only ever silenced in the source.
 
 Bandit also runs in `ci.yml` and pre-commit, so a finding lands next to the lint
 failures instead of only in a dashboard:
@@ -73,13 +85,14 @@ bandit -c pyproject.toml -r src tests
 `.codacy.yaml` and `[tool.bandit]` are kept in step with each other; changing one
 without the other is how the two disagree.
 
-Two rules are switched off for `tests/` only:
+One rule is switched off for `tests/` only, **B101 (`assert` used)** — every
+pytest assertion trips it. The rule exists because `python -O` strips asserts,
+which is not how a test suite runs. There are no asserts under `src/`.
 
-- **B101 (`assert` used)** — every pytest assertion trips it. The rule exists
-  because `python -O` strips asserts, which is not how a test suite runs. There
-  are no asserts under `src/`.
-- **The XML rules** — `tests/test_cli_commands.py` reads back a JUnit report that
-  the same test wrote to a `tmp_path` moments earlier.
+`tests/test_cli_commands.py` reads a JUnit report back to check it, and uses
+defusedxml to do it — not because a file the test wrote three lines earlier is a
+threat, but because it costs nothing: defusedxml is already a runtime dependency
+for `core/parser.py`.
 
 Everything under `src/` is still scanned, and the accepted findings there carry
 their reason next to them, so a *new* finding on one of those lines still has to
@@ -90,14 +103,10 @@ be looked at rather than inheriting a blanket exemption. There are two:
 - **`core/junit.py`** — the only module that writes XML, and it never reads any.
   `defusedxml`, the replacement both tools recommend, exports no
   `Element`/`SubElement`/`ElementTree`, so there is nothing to switch to on the
-  writing side. Bandit accepts the `# nosec B405` on the import; Semgrep does
-  not honour `# nosemgrep` on an `import` statement at all (the same comment
-  silences a call site fine), which is why the writer sits in a module of its
-  own — small enough that exempting the whole file is a proportionate thing to
-  do. The `.codacy.yaml` entry doing that is **not yet confirmed working**: the
-  `tests/**` exclusion above took effect immediately, this one did not, so the
-  pattern form Codacy wants for a single file still needs pinning down. The one
-  place rostree *does* parse XML, `core/parser.py`, uses defusedxml.
+  writing side and nothing to defend against either: the only untrusted values
+  are package names, which ElementTree escapes. Keeping it in its own small
+  module means that argument is made once, at the top of a file you can read in
+  a minute, rather than buried in a 1,300-line CLI.
 
 Bandit logs a `nosec encountered, but no failed test` warning for a couple of
 them — it attributes multi-line statements to the wrong line — which is noise,

@@ -7,7 +7,8 @@ import json
 import os
 from pathlib import Path
 from unittest import mock
-from xml.etree import ElementTree
+
+from defusedxml.ElementTree import parse as parse_xml
 
 from rostree.cli import cmd_check, cmd_rdeps, cmd_tree, cmd_why
 from rostree.core.tree import build_dependency_graph
@@ -452,7 +453,7 @@ class TestJUnitReport:
         with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
             cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
         # Parsing it back is the real assertion: malformed XML raises here.
-        root = ElementTree.parse(report).getroot()
+        root = parse_xml(report).getroot()
         assert root.tag == "testsuite"
         assert root.get("tests") == "2"
         assert root.get("failures") == "1"
@@ -470,7 +471,7 @@ class TestJUnitReport:
         report = tmp_path / "check.xml"
         with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
             cmd_check(args(tmp_path, packages=["a"], ignore_system=False, junit=str(report)))
-        root = ElementTree.parse(report).getroot()
+        root = parse_xml(report).getroot()
         failure = root.findall("testcase")[0].find("failure")
         assert failure.get("type") == "DependencyCycle"
         assert "a -> b -> a" in failure.text
@@ -494,7 +495,7 @@ class TestJUnitReport:
         with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
             cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
         # Parsing succeeds only if the writer escaped the name properly.
-        root = ElementTree.parse(report).getroot()
+        root = parse_xml(report).getroot()
         text = root.findall("testcase")[1].find("failure").text
         assert "weird<&name" in text
 
@@ -507,5 +508,5 @@ class TestJUnitReport:
                 side_effect=build_dependency_graph,
             ):
                 cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
-        root = ElementTree.parse(report).getroot()
+        root = parse_xml(report).getroot()
         assert root.get("package") == "app"

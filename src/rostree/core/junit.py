@@ -16,6 +16,10 @@ defusedxml.
 from __future__ import annotations
 
 from pathlib import Path
+
+# Semgrep's XML rule is not suppressed by a `# nosemgrep` trailing the import —
+# only by one on the line before it, which is what this is.
+# nosemgrep
 from xml.etree.ElementTree import Element, ElementTree, SubElement  # nosec B405
 
 __all__ = ["write_junit_report"]
