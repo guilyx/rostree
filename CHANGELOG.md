@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `package.xml` is now parsed with [defusedxml](https://pypi.org/project/defusedxml/)
+  (a new runtime dependency). `core/parser.py` is the only place rostree reads XML
+  it did not write, and a manifest is just a file in a workspace: one declaring
+  entities could previously make the parser expand them until it ran out of
+  memory. Such a manifest is now refused, which reports the package as unreadable
+  instead of hanging. A `DOCTYPE` that declares nothing still parses, so this
+  drops no package that used to work.
+
+- The JUnit writer moved out of `cli.py` into `core/junit.py`. It is the only
+  code in rostree that writes XML and never reads any, and keeping it separate
+  lets the security scanners be told that once, in one place, instead of on
+  every line of a 1,300-line module.
+- The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
+  Exception: pass` blocks around `query_one` became
+  `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded
+  block raises instead of disappearing. The two guards that are deliberately
+  broad — best-effort tree expansion and collapse, which a background rebuild can
+  interrupt — say so in a comment.
+
+### Added
+
+- Bandit runs in CI (`bandit -c pyproject.toml -r src tests`) and is in the `dev`
+  extra, so the security scan that gates pull requests can be reproduced locally.
+- `.codacy.yaml` records which rules are switched off for the test suite, and why.
+  Accepted findings under `src/` carry an inline suppression with its reason, and
+  [development.md](docs/development.md#static-analysis) writes down where those
+  comments have to sit — which is less obvious than it sounds, and is what made
+  this take four attempts.
+
+## [0.4.0] - 2026-08-07
+
+v0.3.0 made big trees fast. This one makes them *yours*: on a sourced ROS 2
+machine most of what rostree can see belongs to the distro, and until now there
+was no way to say so.
+
+### Added
+
+- **Scope filters on every command that walks the graph** (`tree`, `graph`, `why`,
+  `rdeps`, `check`, `diff`):
+  - `-w/--only-workspace` — ignore packages installed under `/opt/ros`
+  - `--include GLOB` / `--exclude GLOB` — repeatable shell globs on package names
+    (`--include 'nav2_*'`, `--exclude '*_msgs'`); excludes win over includes
+  - A filtered-out package is neither shown nor followed, so anything reachable
+    only through it disappears with it. Commands report what was hidden rather
+    than silently presenting a smaller tree as the whole truth.
+- **`--dep-type runtime|build|test|all`** to choose which `package.xml` tags to
+  follow. `-r/--runtime` stays as a shorthand for `--dep-type runtime`.
+- **`rostree diff`** — what did this package gain, lose or bump?
+  - `rostree diff <a> <b>` compares two packages
+  - `rostree diff <pkg> --save FILE` snapshots the current dependency set, and
+    `--against FILE` compares against it after a rebuild
+  - Reports added / removed / version-changed and exits non-zero on any drift
+- **`rostree check --junit FILE`** writes a JUnit XML report for CI dashboards.
+- `DependencyNode.hidden_children` records how many dependencies a truncated node
+  is not showing, so `… N more` never promises more than the tree would print.
+- `build_dependency_tree()` and `build_dependency_graph()` accept `package_filter`,
+  `report` and (on the tree) `include_tags`.
+
+### Changed
+
+- `rdeps --workspace-only` is now `--only-workspace`; the old spelling still works.
+
+
 ## [0.3.0] - 2026-08-07
 
 Large trees used to take tens of seconds — or never finish. This release makes
@@ -204,7 +269,8 @@ them near-instant and reworks the interface around them.
 - Python 3.10+
 - textual >= 0.47.0
 
-[Unreleased]: https://github.com/guilyx/rostree/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/guilyx/rostree/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/guilyx/rostree/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guilyx/rostree/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/guilyx/rostree/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/guilyx/rostree/compare/v0.2.0...v0.2.1

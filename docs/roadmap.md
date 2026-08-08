@@ -1,230 +1,143 @@
 # rostree Roadmap
 
-Based on the [code review](./review.md), this roadmap prioritizes fixes and features to make rostree production-ready.
+Last reviewed after **v0.3.0** shipped. The original roadmap came out of
+[the code review](./review.md); this version records what shipped, what was
+dropped and why, and what is worth doing next.
 
 ---
 
-## Phase 1: Critical Fixes (v0.3.0) — shipped
+## Shipped in v0.3.0
 
-**Goal:** Make the graph visualization actually work for real workspaces, and make
-large trees usable.
+**Phase 1 (critical fixes) is done**, plus the headline problem that was not on
+the original list.
 
-Delivered in v0.3.0. The headline change was not on this list: dependency tree
-building was **exponential** because a DAG was expanded once per path. Each package
-is now expanded once, where it first appears (see
-[dependency-trees.md](dependency-trees.md#repeats-why-trees-stay-small)), which took
-an unlimited-depth tree from "never finishes" to 0.03 s.
+Dependency tree building was **exponential**: a DAG was expanded once per path, so
+a 159-package workspace printed 68,081 lines at depth 7 and never finished at the
+CLI's default depth. Each package is now expanded once, where the tree first prints
+it (see [dependency-trees.md](dependency-trees.md#repeats-why-trees-stay-small)),
+which took an unlimited-depth tree from "never finishes" to 0.02 s.
 
-Caching was implemented as a one-pass `PackageIndex` (`core/index.py`) rather than a
-per-call cache with a TTL: discovery happens once per run, and the index is cached
-per process and per environment with an explicit `refresh=True`. Disk persistence
-was not needed once a full scan cost milliseconds.
+| Item | Outcome |
+|------|---------|
+| Graph edges to unresolved packages | Kept, drawn dashed; `--hide-missing` to drop them |
+| Package discovery caching | Shipped as a one-pass `PackageIndex`, cached per process and per environment with explicit `refresh=True` — not a TTL cache; a full scan costs milliseconds, so disk persistence was unnecessary |
+| `parse_package_xml` caching | Memoized by path, mtime and size |
+| O(n²) visited-set copying | Gone with the rewrite |
+| Duplicated XML name parsing | Single `quick_package_name()` helper |
+| Progress callbacks | `on_progress` on tree, graph and index building |
+| `NodeStatus` enum, `is_error` | Shipped |
+| DOT / Mermaid generation split out | `core/graph.py` |
+| Reverse dependency lookup | `rostree rdeps`, plus the TUI's `v` view |
+| `rostree check` for CI | Cycles + unresolved deps, non-zero exit |
+| JSON output | `--json` on every command |
 
-### 1.1 Fix Graph Edge Collection
-- [x] Add option to include edges to "(not found)" packages
-- [x] Add `--show-missing` flag to graph command
-- [x] Style missing packages differently (dashed lines, gray nodes)
-- [x] Default behavior: show edges to missing packages in workspace graphs
+Bugs found along the way and fixed: unbuilt `src/` packages were invisible (the
+source root was computed as `<ws>/install/src`), `lib*` packages were discarded,
+text trees drew every child as `├──`, and `graph -w` did not work on an unsourced
+workspace.
 
-### 1.2 Implement ros2 pkg Fallback Properly
+### Dropped, with reasons
 
-Not done, and no longer clearly worth doing: with the index scanning every prefix
-and source root, the packages `ros2 pkg xml` could find are already found, and
-shelling out per package would be far slower. Unresolved names are now surfaced
-honestly (`✗ not found`, dashed graph nodes, `rostree check`) instead of hidden.
-
-- [ ] Add `parse_package_xml_string()` to parser.py
-- [ ] Add `_try_ros2_pkg_xml()` helper to tree.py
-- [ ] Add `_try_ros2_pkg_prefix()` helper to tree.py
-- [ ] Integrate fallback into `build_dependency_tree()`
-- [ ] Add tests with mocked subprocess calls
-- [ ] Document fallback behavior
-
-### 1.3 Add Package Discovery Caching
-- [x] Create `PackageCache` class with TTL — shipped as `PackageIndex`, cached per
-  process and per environment with explicit `refresh=True` instead of a TTL
-- [x] Cache `find_package_path()` results
-- [x] Cache `parse_package_xml()` results
-- [ ] Add `--no-cache` flag for fresh scans
-- [ ] Persist cache to disk (optional)
-
-### 1.4 Fix Performance Issues
-- [x] Fix O(n²) visited set copying in `build_dependency_tree()`
-- [x] Deduplicate XML name parsing into single helper
-- [x] Add progress callback for long operations
+- **`ros2 pkg xml` fallback** (was 1.2). The index already scans every prefix and
+  source root, so it finds everything the fallback could, and shelling out per
+  package would be far slower. Unresolved names are now surfaced honestly instead
+  of hidden.
+- **`ErrorNode` dataclass / discriminated union** (was 2.1). `NodeStatus` covers it.
+  A separate type would break the uniform `children` / `walk()` API for callers.
+- **Web-based interactive viewer** (was 4.2). Large surface area that duplicates
+  what the TUI already does; the repo has been down the webapp road once already.
+- **`--profile` flag** (was 4.4). It existed to diagnose the slowness that is now
+  gone. If performance regresses, a benchmark test is the better tool.
+- **`requirements.txt` generation** (was 3.4). ROS dependencies are rosdep keys and
+  ament packages, not pip distributions; the output would be misleading.
+- **CSV export** (was 3.4). `--json` piped through `jq` covers this.
 
 ---
 
-## Phase 2: Code Quality (v0.4.0)
+## v0.4.0 — make it pleasant on a real workspace *(in progress)*
 
-**Goal:** Make the codebase maintainable and testable.
+The theme is **scoping**. On a sourced ROS 2 machine most of what rostree prints
+belongs to the distro, not to you, and there is currently no way to say so.
 
-### 2.1 Refactor Status Markers
-- [x] Create `NodeStatus` enum
-- [ ] Create `ErrorNode` dataclass (or use discriminated union)
-- [x] Update all status string checks to use enum
-- [x] Add `is_error` property to `DependencyNode`
+### 4.1 Scope and filtering — ✅ shipped
+- [x] `--only-workspace` — exclude packages installed under `/opt/ros`
+- [x] `--exclude PATTERN` (repeatable) — drop packages by glob
+- [x] `--include PATTERN` — restrict to packages matching a glob
+- [x] `--dep-type runtime|build|test|all`, keeping `-r` as an alias
+- [x] Apply consistently across `tree`, `graph`, `why`, `rdeps` and `check`
+- [x] Report what a filter removed, so the tree never silently lies
 
-### 2.2 Split CLI Module
-- [ ] Extract `cli/commands/scan.py`
-- [ ] Extract `cli/commands/list.py`
-- [ ] Extract `cli/commands/tree.py`
-- [ ] Extract `cli/commands/graph.py`
-- [x] Extract `graph/dot.py` — as `core/graph.py::to_dot`
-- [x] Extract `graph/mermaid.py` — as `core/graph.py::to_mermaid`
-- [ ] Extract `graph/render.py` — image rendering is I/O and stayed in `cli.py`
-- [ ] Keep `cli/__init__.py` as entry point
+### 4.2 `rostree diff` — ✅ shipped
+- [x] `rostree diff <pkg_a> <pkg_b>` — compare two packages' dependency sets
+- [x] `rostree diff --save FILE` / `--against FILE` — capture now, compare after a rebuild
+- [x] Report added / removed / version-changed, and exit non-zero on drift
 
-### 2.3 Improve Error Handling
-- [ ] Add `rostree.exceptions` module
-- [ ] Create specific exception types (PackageNotFoundError, ParseError, etc.)
-- [ ] Add optional logging (debug level by default)
-- [ ] Add `--verbose` flag for detailed error output
+### 4.3 CI integration — *partly shipped*
+- [x] `rostree check --junit FILE` for CI dashboards
+- [ ] A composite GitHub Action wrapping `rostree check`
+- [x] Document the pattern in `docs/usage.md`
 
-### 2.4 Dependency Injection for Finder
-- [ ] Create `DiscoveryConfig` dataclass
-- [ ] Add `from_environment()` factory method
-- [ ] Refactor finder functions to accept config
-- [ ] Simplify test mocking
+### 4.4 Configuration file
+- [ ] `[tool.rostree]` in `pyproject.toml` and `.rostreerc` (TOML)
+- [ ] Defaults for depth, dependency scope and filters
+- [ ] CLI arguments always override the file
 
----
-
-## Phase 3: New Features (v0.5.0)
-
-**Goal:** Add commonly requested features.
-
-### 3.1 Reverse Dependency Lookup
-- [x] Add `rostree rdeps <package>` command
-- [x] Build reverse dependency index
-- [x] Show "what depends on X" tree
-- [x] Add to TUI as separate view
-
-### 3.2 Filtering Options
-- [ ] Add `--filter-type` (runtime/build/test/all)
-- [ ] Add `--filter-prefix` (e.g., `nav2_*`)
-- [ ] Add `--exclude` for specific packages
-- [ ] Add `--only-workspace` to exclude system packages
-
-### 3.3 Configuration File Support
-- [ ] Support `.rostreerc` (TOML format)
-- [ ] Support `[tool.rostree]` in `pyproject.toml`
-- [ ] Configuration options: default depth, filters, cache settings
-- [ ] CLI args override config file
-
-### 3.4 Export Formats
-- [x] Add `--format json` for structured output
-- [ ] Add `--format csv` for spreadsheet import
-- [ ] Add SBOM export (CycloneDX format)
-- [ ] Add requirements.txt generation
+### 4.5 Errors and diagnostics
+- [ ] `rostree.exceptions` with `PackageNotFoundError`, `ManifestError`
+- [ ] Optional logging behind `--debug`
 
 ---
 
-## Phase 4: Advanced Features (v0.6.0)
+## Later: v0.5.0 — confidence
 
-**Goal:** Power user features and integrations.
+### 5.1 Integration tests against real ROS 2
+- [ ] Run the suite in a `ros:jazzy` container in CI
+- [ ] Assert against real packages (`rclcpp`, `nav2_bringup`) rather than fixtures
+- [ ] A benchmark test that fails if tree building goes superlinear again
 
-### 4.1 Dependency Diff
-- [ ] Add `rostree diff <pkg1> <pkg2>` command
-- [ ] Compare package.xml versions
-- [ ] Highlight added/removed/changed dependencies
-- [ ] Support comparing workspace snapshots
+The highest-confidence item on the list: the `<ws>/install/src` bug lived in the
+code for every release so far, and no fixture-based test could have caught it.
 
-### 4.2 Interactive Graph
-- [ ] Add web-based interactive viewer
-- [ ] Click to expand/collapse subtrees
-- [ ] Search and highlight in graph
-- [ ] Export filtered views
+### 5.2 SBOM export
+- [ ] CycloneDX output for a package or a whole workspace
+- [ ] Include unresolved rosdep keys as external references
 
-### 4.3 CI/CD Integration
-- [x] Add `rostree check` command for CI
-- [x] Detect circular dependencies
-- [x] Detect missing dependencies
-- [ ] Output JUnit XML for test frameworks
-- [ ] GitHub Action for automated checks
+### 5.3 Split the CLI module
+- [ ] `cli.py` is ~1,200 lines; split into `cli/commands/*.py`
+- [ ] Keep `rostree.cli` re-exporting the current names — a lot of tests and
+      downstream code import from it
 
-### 4.4 Performance Monitoring
-- [ ] Add `--profile` flag
-- [ ] Report filesystem operations count
-- [ ] Report cache hit/miss ratio
-- [ ] Suggest optimizations
-
----
-
-## Phase 5: Ecosystem (v1.0.0)
-
-**Goal:** Production-ready with comprehensive documentation.
-
-### 5.1 Documentation Overhaul
-- [x] Add video tutorials — a promo/demo cast lives in `docs/media/`
-- [ ] Add architecture documentation
-- [ ] Add API reference with examples
-- [ ] Add troubleshooting guide
-- [ ] Add contribution guidelines
-
-### 5.2 Integration Tests
-- [ ] Add tests against real ROS 2 packages
-- [ ] Add performance benchmarks
-- [ ] Add memory usage tests
-- [ ] Set up CI with ROS 2 Docker images
-
-### 5.3 Plugin System
-- [ ] Define plugin interface
-- [ ] Allow custom output formatters
-- [ ] Allow custom package finders
-- [ ] Document plugin development
+Deliberately last: pure churn with no user-visible benefit, so it should follow
+the features rather than block them.
 
 ### 5.4 Distribution
-- [ ] Publish to ROS 2 package index
-- [ ] Create Debian package
-- [ ] Create conda-forge package
-- [ ] Add to rosdep database
+- [ ] Publish to the ROS 2 package index
+- [ ] conda-forge package
 
 ---
 
-## Version Milestones
+## Quick wins
 
-| Version | Target | Key Deliverables |
-|---------|--------|------------------|
-| 0.3.0 | ✅ shipped | Linear tree building, package index, graphs keep missing edges, `why`/`rdeps`/`check` |
-| 0.4.0 | Q2 2026 | Refactored codebase, better errors |
-| 0.5.0 | Q2 2026 | Reverse deps, filtering, config files |
-| 0.6.0 | Q3 2026 | Diff, interactive graph, CI integration |
-| 1.0.0 | Q4 2026 | Production-ready, documented, distributed |
-
----
-
-## Quick Wins (Can Be Done Anytime)
-
-These are low-effort improvements that can be merged opportunistically:
-
-- [x] Add `NodeStatus` enum (1 hour)
-- [x] Deduplicate XML name parsing (2 hours)
-- [x] Fix visited set copying (30 minutes)
-- [x] Add type hints to TUI helpers (1 hour)
-- [ ] Add docstrings to test methods (2 hours)
-- [ ] Add `--quiet` flag to suppress progress output (30 minutes)
-- [x] Allow TUI limits to be overridden via env vars — obsolete: the 80-per-source
-  and 500-node caps were removed rather than made configurable
+- [ ] `--quiet` to suppress the summary line
+- [ ] Shell completion (`argcomplete`) for package names
+- [ ] Colour-blind-safe palette option
 
 ---
 
 ## Contributing
 
-See [development.md](./development.md) for setup instructions.
+See [development.md](./development.md) for setup.
 
 When picking up a roadmap item:
 1. Create an issue referencing this roadmap
-2. Assign yourself
-3. Create a feature branch
-4. Add tests for new functionality
-5. Update documentation
-6. Submit PR referencing the issue
+2. Create a feature branch
+3. Add tests for new functionality
+4. Update documentation and `CHANGELOG.md`
+5. Submit a PR referencing the issue
 
 ---
 
 ## Feedback
 
-This roadmap is a living document. Open an issue to:
-- Suggest new features
-- Reprioritize existing items
-- Report blockers or dependencies
+This roadmap is a living document. Open an issue to suggest features,
+reprioritize, or report blockers.

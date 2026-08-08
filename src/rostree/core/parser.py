@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import ParseError
+from defusedxml.ElementTree import parse as parse_xml
+
+# This is the only place in rostree that *reads* XML, so it is the only place
+# where the parser's own behaviour is a security question.
+#
+# CPython's `xml.etree` resolves no external entities and fetches no DTDs, so
+# XXE and SSRF never applied here. It can, however, be made to expand entities
+# until it runs out of memory, and a package.xml is just a file sitting in a
+# workspace. defusedxml refuses a manifest that declares a DTD or an entity at
+# all, which turns that from a hang into a skipped package — the same outcome as
+# any other manifest rostree cannot read.
 
 # Tags that declare dependency on another ROS package (we collect these for the tree).
 DEPENDENCY_TAGS = (
@@ -144,8 +157,10 @@ def _parse_package_xml_uncached(
     if not path.exists() or not path.is_file():
         return None
     try:
-        tree = ET.parse(path)
-    except (ET.ParseError, OSError):
+        tree = parse_xml(path)
+    except (ParseError, DefusedXmlException, OSError):
+        # DefusedXmlException covers a manifest carrying a DTD or entity
+        # declaration: unreadable, like any other malformed package.xml.
         return None
     root = tree.getroot()
     if root.tag != "package":

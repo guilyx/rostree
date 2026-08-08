@@ -255,3 +255,67 @@ class TestParsePackageXml:
         assert info.version == "2.0.0"
         assert info.description == "Whitespace test"
         assert "rclpy" in info.dependencies
+
+
+class TestHostileManifests:
+    """
+    A package.xml is a file in a workspace, so it is worth pinning down what
+    happens when one is not merely malformed but deliberately unpleasant.
+    """
+
+    def test_entity_expansion_is_refused_not_expanded(self, tmp_path: Path) -> None:
+        """The 'billion laughs' shape: refused outright, so it can never expand."""
+        pkg = tmp_path / "package.xml"
+        pkg.write_text(
+            """<?xml version="1.0"?>
+<!DOCTYPE package [
+  <!ENTITY a "aaaaaaaaaa">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+]>
+<package format="3">
+  <name>bomb</name>
+  <version>1.0.0</version>
+  <description>&c;</description>
+</package>
+"""
+        )
+        assert parse_package_xml(pkg) is None
+
+    def test_a_doctype_declaring_nothing_is_still_read(self, tmp_path: Path) -> None:
+        """
+        It is the entity *declaration* that gets refused, not the DOCTYPE.
+
+        An external DTD is never fetched, so a manifest carrying one has nothing
+        to expand and is no reason to drop a package from the tree.
+        """
+        pkg = tmp_path / "package.xml"
+        pkg.write_text(
+            """<?xml version="1.0"?>
+<!DOCTYPE package SYSTEM "package.dtd">
+<package format="3">
+  <name>doctyped</name>
+  <version>1.0.0</version>
+  <description>d</description>
+</package>
+"""
+        )
+        info = parse_package_xml(pkg)
+        assert info is not None
+        assert info.name == "doctyped"
+
+    def test_the_five_predefined_entities_still_work(self, tmp_path: Path) -> None:
+        """Refusing declarations must not break ordinary escaping."""
+        pkg = tmp_path / "package.xml"
+        pkg.write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>escaped</name>
+  <version>1.0.0</version>
+  <description>a &lt; b &amp; c</description>
+</package>
+"""
+        )
+        info = parse_package_xml(pkg)
+        assert info is not None
+        assert info.description == "a < b & c"

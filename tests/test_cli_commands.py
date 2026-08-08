@@ -8,7 +8,10 @@ import os
 from pathlib import Path
 from unittest import mock
 
+from defusedxml.ElementTree import parse as parse_xml
+
 from rostree.cli import cmd_check, cmd_rdeps, cmd_tree, cmd_why
+from rostree.core.tree import build_dependency_graph
 from tests.conftest import write_package
 
 EMPTY_ENV = {
@@ -27,7 +30,17 @@ def stack(root: Path) -> None:
 
 
 def args(tmp_path: Path, **overrides) -> argparse.Namespace:
-    base = dict(source=[str(tmp_path)], runtime=False, json=False, verbose=False)
+    base = dict(
+        source=[str(tmp_path)],
+        runtime=False,
+        dep_type=None,
+        json=False,
+        verbose=False,
+        include=None,
+        exclude=None,
+        only_workspace=False,
+        junit=None,
+    )
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -312,3 +325,188 @@ class TestCmdWhyValidation:
         out = capsys.readouterr().out
         assert result == 0
         assert "app → core → util → missing_key" in out or "app → util → missing_key" in out
+
+
+class TestFilterFlags:
+    """The scope flags shared by the graph-walking commands."""
+
+    def test_tree_exclude_drops_a_subtree(self, tmp_path: Path, capsys) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "rosidl_thing", depends=["leaf"])
+        write_package(tmp_path, "app", depends=["rosidl_thing"])
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_tree(args(tmp_path, package="app", depth=None, exclude=["rosidl_*"]))
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "rosidl_thing" not in captured.out
+        assert "leaf" not in captured.out
+        # ...and the tree says so rather than quietly hiding it.
+        assert "hidden by filters" in captured.err
+
+    def test_tree_include_keeps_only_matches(self, tmp_path: Path, capsys) -> None:
+        write_package(tmp_path, "nav2_util")
+        write_package(tmp_path, "rclcpp")
+        write_package(tmp_path, "nav2_bringup", depends=["nav2_util", "rclcpp"])
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_tree(args(tmp_path, package="nav2_bringup", depth=None, include=["nav2_*"]))
+        out = capsys.readouterr().out
+        assert "nav2_util" in out
+        assert "rclcpp" not in out
+
+    def test_dep_type_selects_the_tags(self, tmp_path: Path, capsys) -> None:
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <exec_depend>runtime_dep</exec_depend>
+  <build_depend>build_dep</build_depend>
+</package>
+"""
+        )
+        write_package(tmp_path, "runtime_dep")
+        write_package(tmp_path, "build_dep")
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_tree(args(tmp_path, package="app", depth=None, dep_type="build"))
+        out = capsys.readouterr().out
+        assert "build_dep" in out
+        assert "runtime_dep" not in out
+
+    def test_dep_type_overrides_the_runtime_shorthand(self, tmp_path: Path, capsys) -> None:
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <exec_depend>runtime_dep</exec_depend>
+  <test_depend>test_dep</test_depend>
+</package>
+"""
+        )
+        write_package(tmp_path, "runtime_dep")
+        write_package(tmp_path, "test_dep")
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_tree(args(tmp_path, package="app", depth=None, runtime=True, dep_type="test"))
+        out = capsys.readouterr().out
+        assert "test_dep" in out
+        assert "runtime_dep" not in out
+
+    def test_rdeps_honours_include(self, tmp_path: Path, capsys) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "nav2_user", depends=["leaf"])
+        write_package(tmp_path, "other_user", depends=["leaf"])
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_rdeps(
+                args(
+                    tmp_path,
+                    package="leaf",
+                    transitive=False,
+                    only_workspace=False,
+                    include=["nav2_*"],
+                )
+            )
+        out = capsys.readouterr().out
+        assert "nav2_user" in out
+        assert "other_user" not in out
+
+    def test_check_junit_report(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app", depends=["missing_key"])
+        report = tmp_path / "reports" / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_check(
+                args(tmp_path, packages=["app"], ignore_system=False, junit=str(report))
+            )
+        assert result == 1
+        assert report.exists()
+        text = report.read_text()
+        assert "<testsuite" in text
+        assert "UnresolvedDependency" in text
+        assert "missing_key" in text
+
+    def test_check_junit_passes_cleanly(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf")
+        write_package(tmp_path, "app", depends=["leaf"])
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            result = cmd_check(
+                args(tmp_path, packages=["app"], ignore_system=False, junit=str(report))
+            )
+        assert result == 0
+        assert "<failure" not in report.read_text()
+
+
+class TestJUnitReport:
+    """
+    The report has to survive package names that are arbitrary text.
+
+    Each test reads back a file it wrote to ``tmp_path`` a few lines earlier;
+    parsing is the assertion, since malformed XML raises rather than compares.
+    """
+
+    def test_report_is_well_formed_xml(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app", depends=["missing_key"])
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        # Parsing it back is the real assertion: malformed XML raises here.
+        root = parse_xml(report).getroot()
+        assert root.tag == "testsuite"
+        assert root.get("tests") == "2"
+        assert root.get("failures") == "1"
+        cases = root.findall("testcase")
+        assert [c.get("name") for c in cases] == [
+            "no dependency cycles",
+            "all dependencies resolve",
+        ]
+        assert cases[0].find("failure") is None
+        assert "missing_key" in cases[1].find("failure").text
+
+    def test_cycles_are_reported_as_a_failing_case(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "a", depends=["b"])
+        write_package(tmp_path, "b", depends=["a"])
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["a"], ignore_system=False, junit=str(report)))
+        root = parse_xml(report).getroot()
+        failure = root.findall("testcase")[0].find("failure")
+        assert failure.get("type") == "DependencyCycle"
+        assert "a -> b -> a" in failure.text
+
+    def test_xml_metacharacters_in_names_are_escaped(self, tmp_path: Path) -> None:
+        """A dependency name is arbitrary text; it must not break the document."""
+        pkg = tmp_path / "app"
+        pkg.mkdir()
+        # Entities in the manifest, so the *parsed* name really holds < and &.
+        pkg.joinpath("package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>app</name>
+  <version>1.0.0</version>
+  <description>d</description>
+  <depend>weird&lt;&amp;name</depend>
+</package>
+"""
+        )
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        # Parsing succeeds only if the writer escaped the name properly.
+        root = parse_xml(report).getroot()
+        text = root.findall("testcase")[1].find("failure").text
+        assert "weird<&name" in text
+
+    def test_root_names_are_escaped_in_attributes(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "app")
+        report = tmp_path / "check.xml"
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            with mock.patch(
+                "rostree.cli.build_dependency_graph",
+                side_effect=build_dependency_graph,
+            ):
+                cmd_check(args(tmp_path, packages=["app"], ignore_system=False, junit=str(report)))
+        root = parse_xml(report).getroot()
+        assert root.get("package") == "app"

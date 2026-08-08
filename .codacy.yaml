@@ -1,0 +1,26 @@
+---
+# Codacy analysis configuration.
+#
+# Codacy runs two security tools on this repository, and they are silenced by
+# different means:
+#
+#   * Bandit    — `# nosec B123` on the line, or exclude_paths below.
+#   * Semgrep   — `# nosemgrep` on the line, or the line above it.
+#
+# What we learned the hard way, recorded so nobody repeats it: an
+# `engines.semgrep.exclude_paths` block is **not** honoured — findings under a
+# path listed there were still reported, while the identical `engines.bandit`
+# block took effect on the first run. Semgrep is therefore handled in the source,
+# never here.
+#
+# `tests/**` is excluded from Bandit for one rule's sake, B101 (`assert` used).
+# Every pytest assertion trips it; the warning exists because `python -O` strips
+# asserts, which is not how a test suite runs. There are 727 asserts under
+# tests/ and none under src/, so this hides nothing.
+#
+# Keep this in step with [tool.bandit] in pyproject.toml, which is what the
+# `bandit` job in .github/workflows/ci.yml runs.
+engines:
+  bandit:
+    exclude_paths:
+      - 'tests/**'

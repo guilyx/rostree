@@ -15,6 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable
 
+from rostree.core.filters import FilterReport, PackageFilter
 from rostree.core.index import PackageIndex, get_index
 from rostree.core.parser import (
     RUNTIME_DEPENDENCY_TAGS,
@@ -71,6 +72,9 @@ class DependencyNode:
     # Optional: store raw PackageInfo for API consumers
     package_info: PackageInfo | None = None
     status: NodeStatus = NodeStatus.OK
+    #: Dependencies this node has but does not show (depth limit, node budget).
+    #: Reflects filtering, so it never promises more than the tree would print.
+    hidden_children: int = 0
 
     @property
     def is_error(self) -> bool:
@@ -171,6 +175,8 @@ def build_dependency_graph(
     include_tags: tuple[str, ...] | None = None,
     extra_source_roots: list[Path] | None = None,
     index: PackageIndex | None = None,
+    package_filter: PackageFilter | None = None,
+    report: FilterReport | None = None,
     on_progress: Callable[[int, str], None] | None = None,
 ) -> DependencyGraph:
     """
@@ -211,17 +217,30 @@ def build_dependency_graph(
             graph.edges.setdefault(name, [])
             continue
         graph.packages[name] = info
-        graph.edges[name] = list(info.dependencies)
+        deps = _apply_filter(info.dependencies, package_filter, index, report)
+        graph.edges[name] = deps
         if on_progress is not None:
             on_progress(len(graph.packages), name)
         if max_depth is not None and depth >= max_depth:
             continue
-        for dep in info.dependencies:
+        for dep in deps:
             if dep not in graph.depths:
                 graph.depths[dep] = depth + 1
                 queue.append((dep, depth + 1))
 
     return graph
+
+
+def _apply_filter(
+    names: list[str],
+    package_filter: PackageFilter | None,
+    index: PackageIndex,
+    report: FilterReport | None,
+) -> list[str]:
+    """Drop dependencies the filter rejects; a rejected package is not followed."""
+    if package_filter is None or package_filter.is_noop:
+        return list(names)
+    return package_filter.filter_names(names, index, report)
 
 
 def _resolve_tags(
@@ -245,9 +264,12 @@ def build_dependency_tree(
     max_depth: int | None = None,
     include_buildtool: bool = False,
     runtime_only: bool = False,
+    include_tags: tuple[str, ...] | None = None,
     extra_source_roots: list[Path] | None = None,
     collapse_repeats: bool = True,
     index: PackageIndex | None = None,
+    package_filter: PackageFilter | None = None,
+    report: FilterReport | None = None,
     max_nodes: int | None = None,
     on_progress: Callable[[int, str], None] | None = None,
     _depth: int = 0,
@@ -263,12 +285,18 @@ def build_dependency_tree(
             not runtime packages, and are never traversed).
         runtime_only: If True, only depend and exec_depend (no build/test deps);
             much smaller and faster for packages with heavy build toolchains.
+        include_tags: Explicit package.xml tags to follow, overriding runtime_only.
         extra_source_roots: Optional list of Paths to scan for packages (user-added).
         collapse_repeats: When True (the default) a package that already appears in
             full elsewhere in the tree is emitted once as a ``REPEAT`` leaf instead of
             being expanded again. This is what keeps large trees linear rather than
             exponential; set it to False for a fully expanded tree.
         index: Reuse an existing package index instead of building one.
+        package_filter: Optional :class:`~rostree.core.filters.PackageFilter`. A
+            filtered-out dependency is neither shown nor followed, so anything
+            reachable only through it disappears with it.
+        report: Optional :class:`~rostree.core.filters.FilterReport` collecting
+            what the filter removed, so callers can report it.
         max_nodes: Stop after emitting this many nodes (a safety valve for
             ``collapse_repeats=False``).
         on_progress: Called as ``(nodes_so_far, package_name)`` while building.
@@ -283,7 +311,7 @@ def build_dependency_tree(
     tags = _resolve_tags(
         runtime_only=runtime_only,
         include_buildtool=include_buildtool,
-        include_tags=None,
+        include_tags=include_tags,
     )
 
     if max_depth is not None and _depth > max_depth:
@@ -299,6 +327,8 @@ def build_dependency_tree(
         tags=tags,
         max_depth=remaining_depth,
         collapse_repeats=collapse_repeats,
+        package_filter=package_filter,
+        report=report,
         max_nodes=max_nodes,
         on_progress=on_progress,
     )
@@ -315,6 +345,8 @@ class _TreeBuilder:
         tags: tuple[str, ...] | None,
         max_depth: int | None,
         collapse_repeats: bool,
+        package_filter: PackageFilter | None,
+        report: FilterReport | None,
         max_nodes: int | None,
         on_progress: Callable[[int, str], None] | None,
     ) -> None:
@@ -322,6 +354,8 @@ class _TreeBuilder:
         self.tags = tags
         self.max_depth = max_depth
         self.collapse_repeats = collapse_repeats
+        self.package_filter = package_filter
+        self.report = report
         self.max_nodes = max_nodes
         self.on_progress = on_progress
         self.expanded: set[str] = set()
@@ -360,20 +394,26 @@ class _TreeBuilder:
             node.status = NodeStatus.REPEAT
             return node
 
+        deps = _apply_filter(info.dependencies, self.package_filter, self.index, self.report)
+        if not deps:
+            # Everything it depends on was filtered away, so it is a leaf here.
+            self.expanded.add(name)
+            return node
+
         if self.max_depth is not None and depth >= self.max_depth:
             node.status = NodeStatus.TRUNCATED
+            node.hidden_children = len(deps)
             return node
 
         if self.max_nodes is not None and self.count >= self.max_nodes:
             self.truncated = True
             node.status = NodeStatus.TRUNCATED
+            node.hidden_children = len(deps)
             return node
 
         self.expanded.add(name)
         child_path = path | {name}
-        node.children = [
-            self.build(dep, depth=depth + 1, path=child_path) for dep in info.dependencies
-        ]
+        node.children = [self.build(dep, depth=depth + 1, path=child_path) for dep in deps]
         return node
 
     def _should_expand(self, name: str) -> bool:

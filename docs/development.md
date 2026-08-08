@@ -11,7 +11,8 @@ rostree/
 │   │   ├── finder.py     # Workspace scanning + name lookups
 │   │   ├── parser.py     # package.xml parsing (memoized)
 │   │   ├── tree.py       # DependencyGraph + DependencyNode
-│   │   └── graph.py      # DOT / Mermaid generation
+│   │   ├── graph.py      # DOT / Mermaid generation
+│   │   └── junit.py      # JUnit report for `rostree check --junit`
 │   ├── api.py            # Public API
 │   ├── cli.py            # Command line interface
 │   └── tui/              # Textual TUI
@@ -29,7 +30,7 @@ pip install -e ".[dev]"
 # or: uv pip install -e ".[dev]"
 ```
 
-Dev extras: pytest, pytest-cov, ruff, black.
+Dev extras: pytest, pytest-cov, ruff, black, bandit.
 
 ## Pre-commit
 
@@ -47,9 +48,73 @@ pre-commit install --hook-type commit-msg
 - **Black** — Format (line-length 100).
 - **conventional-pre-commit** — Commit message prefix check (commit-msg hook).
 
+## Static analysis
+
+Pull requests are scanned by [Codacy](https://www.codacy.com/), which runs
+**two** tools whose findings look alike but are suppressed differently:
+
+| Tool | Suppressed by | Reported as |
+|------|---------------|-------------|
+| Bandit | `# nosec B123` | Low / Medium / High |
+| Semgrep | `# nosemgrep` | Critical |
+
+A `# nosec` does nothing to a Semgrep finding, and vice versa, so the few lines
+that trip both carry both. Three things about placement, each of which cost a
+CI round to learn:
+
+1. Bandit reads everything after `nosec` as a list of rule IDs, so the reasoning
+   goes on the line above, not trailing it, and `nosec` comes last.
+2. Both comments must sit on the line the tool *reports*. Adding them can push a
+   line past 100 characters, at which point black splits the call and strands the
+   comment on the closing paren — where it silences nothing. Put it on the
+   `subprocess.run(` line and let the arguments wrap.
+3. Semgrep does not accept a trailing `# nosemgrep` on an `import`; it has to go
+   on the line before.
+
+`.codacy.yaml` carries a fourth: an `engines.semgrep.exclude_paths` block is not
+honoured at all, though the identical `engines.bandit` one is. Semgrep is
+therefore only ever silenced in the source.
+
+Bandit also runs in `ci.yml` and pre-commit, so a finding lands next to the lint
+failures instead of only in a dashboard:
+
+```bash
+bandit -c pyproject.toml -r src tests
+```
+
+`.codacy.yaml` and `[tool.bandit]` are kept in step with each other; changing one
+without the other is how the two disagree.
+
+One rule is switched off for `tests/` only, **B101 (`assert` used)** — every
+pytest assertion trips it. The rule exists because `python -O` strips asserts,
+which is not how a test suite runs. There are no asserts under `src/`.
+
+`tests/test_cli_commands.py` reads a JUnit report back to check it, and uses
+defusedxml to do it — not because a file the test wrote three lines earlier is a
+threat, but because it costs nothing: defusedxml is already a runtime dependency
+for `core/parser.py`.
+
+Everything under `src/` is still scanned, and the accepted findings there carry
+their reason next to them, so a *new* finding on one of those lines still has to
+be looked at rather than inheriting a blanket exemption. There are two:
+
+- **The `subprocess` calls in `cli.py`** — fixed argv, absolute path from
+  `shutil.which`, no shell anywhere.
+- **`core/junit.py`** — the only module that writes XML, and it never reads any.
+  `defusedxml`, the replacement both tools recommend, exports no
+  `Element`/`SubElement`/`ElementTree`, so there is nothing to switch to on the
+  writing side and nothing to defend against either: the only untrusted values
+  are package names, which ElementTree escapes. Keeping it in its own small
+  module means that argument is made once, at the top of a file you can read in
+  a minute, rather than buried in a 1,300-line CLI.
+
+Bandit logs a `nosec encountered, but no failed test` warning for a couple of
+them — it attributes multi-line statements to the wrong line — which is noise,
+not a stale suppression.
+
 ## CI
 
-- **ci.yml** — lint (ruff, black) plus pytest with coverage on Python 3.10–3.12.
+- **ci.yml** — lint (ruff, black, bandit) plus pytest with coverage on Python 3.10–3.12.
 - **publish.yml** — Build and publish to PyPI on release (Trusted Publishing).
 
 CI runs on every push/PR to main/master.

@@ -1,6 +1,6 @@
 [project]
 name = "rostree"
-version = "0.3.0"
+version = "0.4.0"
 description = "Explore ROS 2 package dependencies from the command line (CLI, TUI, library)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,8 @@ classifiers = [
 dependencies = [
     "textual>=0.47.0",
     "rich>=13.0",
+    # Reading a package.xml is the one place rostree parses XML it did not write.
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,7 @@ viz = [
     "matplotlib>=3.7",
 ]
 dev = [
+    "bandit[toml]==1.9.4",
     "black==25.1.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -65,6 +68,13 @@ extend-exclude = '''
   | \.venv
 )/
 '''
+
+[tool.bandit]
+# Mirrors .codacy.yaml, so `bandit -c pyproject.toml -r src tests` locally and in
+# CI reports what the Codacy gate reports. No rules are skipped globally: the
+# handful of accepted findings under src/ carry an inline `# nosec <id>` with the
+# reason, so a new one still has to be looked at rather than inherited.
+exclude_dirs = ["tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
