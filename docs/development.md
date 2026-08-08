@@ -11,7 +11,8 @@ rostree/
 │   │   ├── finder.py     # Workspace scanning + name lookups
 │   │   ├── parser.py     # package.xml parsing (memoized)
 │   │   ├── tree.py       # DependencyGraph + DependencyNode
-│   │   └── graph.py      # DOT / Mermaid generation
+│   │   ├── graph.py      # DOT / Mermaid generation
+│   │   └── junit.py      # JUnit report for `rostree check --junit`
 │   ├── api.py            # Public API
 │   ├── cli.py            # Command line interface
 │   └── tui/              # Textual TUI
@@ -49,11 +50,7 @@ pre-commit install --hook-type commit-msg
 
 ## Static analysis
 
-```bash
-bandit -c pyproject.toml -r src tests
-```
-
-Pull requests are also scanned by [Codacy](https://www.codacy.com/), which runs
+Pull requests are scanned by [Codacy](https://www.codacy.com/), which runs
 **two** tools whose findings look alike but are suppressed differently:
 
 | Tool | Suppressed by | Reported as |
@@ -88,13 +85,16 @@ Everything under `src/` is still scanned, and the accepted findings there carry
 their reason next to them, so a *new* finding on one of those lines still has to
 be looked at rather than inheriting a blanket exemption. There are two:
 
-- **`cli.py`'s `xml.etree` import** — `_write_junit` writes a report and never
-  reads one. `defusedxml`, the replacement both tools recommend, exports no
+- **The `subprocess` calls in `cli.py`** — fixed argv, absolute path from
+  `shutil.which`, no shell anywhere.
+- **`core/junit.py`** — the only module that writes XML, and it never reads any.
+  `defusedxml`, the replacement both tools recommend, exports no
   `Element`/`SubElement`/`ElementTree`, so there is nothing to switch to on the
-  writing side. The one place rostree *does* parse XML, `core/parser.py`, uses
-  defusedxml.
-- **The `subprocess` calls** — fixed argv, absolute path from `shutil.which`, no
-  shell anywhere.
+  writing side. `# nosemgrep` is not honoured on `import` statements (it silences
+  a call site but not an import), so the writer lives in its own module and
+  `.codacy.yaml` exempts that one file from Semgrep. Bandit still scans it, and
+  it is short enough to read in one sitting. The one place rostree *does* parse
+  XML, `core/parser.py`, uses defusedxml.
 
 Bandit logs a `nosec encountered, but no failed test` warning for a couple of
 them — it attributes multi-line statements to the wrong line — which is noise,

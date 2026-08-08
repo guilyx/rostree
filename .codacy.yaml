@@ -20,6 +20,15 @@
 #
 # Keep this in step with [tool.bandit] in pyproject.toml, which is what the
 # `bandit` job in .github/workflows/ci.yml runs.
+#
+# core/junit.py is excluded from Semgrep for one specific reason. Semgrep's XML
+# rules fire on the `xml.etree` import and tell you to use defusedxml. That
+# advice is about parsing hostile input; defusedxml exports no Element,
+# SubElement or ElementTree, so there is nothing to switch to on the writing
+# side. `# nosemgrep` turned out not to be honoured on import statements — it
+# silenced the subprocess call sites in cli.py but neither import — so the
+# writer was moved into its own module small enough to exempt honestly. It does
+# nothing but build and write a JUnit report, and Bandit still scans it.
 engines:
   bandit:
     exclude_paths:
@@ -27,3 +36,4 @@ engines:
   semgrep:
     exclude_paths:
       - 'tests/**'
+      - 'src/rostree/core/junit.py'

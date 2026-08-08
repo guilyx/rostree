@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of hanging. A `DOCTYPE` that declares nothing still parses, so this
   drops no package that used to work.
 
+- The JUnit writer moved out of `cli.py` into `core/junit.py`. It is the only
+  code in rostree that writes XML and never reads any, and keeping it separate
+  lets the security scanners be told that once, in one place, instead of on
+  every line of a 1,300-line module.
 - The TUI's widget guards no longer catch bare `Exception`. Eleven `try/except
   Exception: pass` blocks around `query_one` became
   `contextlib.suppress(QueryError, ScreenStackError)`, so a bug inside a guarded

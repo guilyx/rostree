@@ -7,23 +7,12 @@ import json
 import os
 import platform
 import shutil
+
+# Every call site below hands execv a fixed argv and a path resolved through
+# shutil.which; no shell is involved anywhere.
 import subprocess  # nosemgrep  # nosec B404
 import sys
 from pathlib import Path
-
-# Suppressed, not overlooked. Scanners flag both of these imports on sight:
-#
-#   * subprocess — every call site below hands execv a fixed argv and a path
-#     resolved through shutil.which. No shell is involved anywhere.
-#   * xml.etree — _write_junit *writes* a report and never reads one, so the
-#     XXE advice attached to the rule cannot apply. defusedxml is the
-#     recommended replacement and exports no Element/SubElement/ElementTree, so
-#     there is nothing to switch to on the writing side. The one place rostree
-#     does parse XML, core/parser.py, uses defusedxml.
-#
-# Kept on one line on purpose: Semgrep reports one finding per imported name, and
-# `# nosemgrep` only silences the line it sits on.
-from xml.etree.ElementTree import Element, ElementTree, SubElement  # nosemgrep  # nosec B405
 
 from rich.console import Console
 from rich.text import Text
@@ -42,6 +31,7 @@ from rostree.core.finder import (
 )
 from rostree.core.graph import GraphView, mermaid_id, to_dot, to_mermaid
 from rostree.core.index import PackageIndex, SourceKind
+from rostree.core.junit import write_junit_report
 from rostree.core.tree import (
     DependencyGraph,
     DependencyNode,
@@ -563,7 +553,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     junit = getattr(args, "junit", None)
     if junit:
-        _write_junit(Path(junit), roots, cycles, missing)
+        write_junit_report(Path(junit), roots, cycles, missing)
         _err.print(f"[dim]JUnit report written to {junit}[/]")
 
     if args.json:
@@ -723,49 +713,6 @@ def cmd_diff(args: argparse.Namespace) -> int:
             line.append(f"  {before[name]} → {after[name]}", style="cyan")
             _out.print(line)
     return 1
-
-
-def _write_junit(path: Path, roots: list[str], cycles: list[list[str]], missing: list[str]) -> None:
-    """
-    Emit a JUnit report so CI dashboards can show what `check` found.
-
-    Built with ElementTree rather than string concatenation: package names are
-    arbitrary text and the library is what gets the escaping right. Note that
-    nothing here *parses* XML, so the XXE advice attached to this import does not
-    apply — see `parser.py` for the place that does read manifests.
-    """
-    suite = Element(
-        "testsuite",
-        name="rostree check",
-        tests="2",
-        failures=str(bool(cycles) + bool(missing)),
-        package=",".join(roots[:20]),
-    )
-
-    cycle_case = SubElement(suite, "testcase", classname="rostree", name="no dependency cycles")
-    if cycles:
-        failure = SubElement(
-            cycle_case,
-            "failure",
-            message=f"{len(cycles)} dependency cycle(s)",
-            type="DependencyCycle",
-        )
-        failure.text = "\n".join(" -> ".join(cycle) for cycle in cycles)
-
-    missing_case = SubElement(
-        suite, "testcase", classname="rostree", name="all dependencies resolve"
-    )
-    if missing:
-        failure = SubElement(
-            missing_case,
-            "failure",
-            message=f"{len(missing)} unresolved dependency name(s)",
-            type="UnresolvedDependency",
-        )
-        failure.text = "\n".join(missing)
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    ElementTree(suite).write(path, encoding="utf-8", xml_declaration=True)
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
