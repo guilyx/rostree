@@ -20,11 +20,10 @@ from pathlib import Path
 #     recommended replacement and exports no Element/SubElement/ElementTree, so
 #     there is nothing to switch to on the writing side. The one place rostree
 #     does parse XML, core/parser.py, uses defusedxml.
-from xml.etree.ElementTree import (  # nosemgrep  # nosec B405
-    Element,
-    ElementTree,
-    SubElement,
-)
+#
+# Kept on one line on purpose: Semgrep reports one finding per imported name, and
+# `# nosemgrep` only silences the line it sits on.
+from xml.etree.ElementTree import Element, ElementTree, SubElement  # nosemgrep  # nosec B405
 
 from rich.console import Console
 from rich.text import Text
