@@ -108,7 +108,39 @@ In CI:
 
 ### `rostree graph`
 
-Generate dependency graphs in DOT (Graphviz) or Mermaid format. Can render directly to PNG/SVG/PDF.
+Generate dependency graphs as an interactive HTML page, or as DOT (Graphviz) or
+Mermaid text. DOT can be rendered straight to PNG/SVG/PDF.
+
+**Interactive HTML** — the one to reach for when you are actually trying to
+understand something, rather than paste a picture into a document:
+
+```bash
+rostree graph nav2_bringup -f html --open   # write nav2_bringup.html and open it
+rostree graph -w ~/ros2_ws -f html -o ws.html
+rostree graph my_pkg -f html --only-workspace
+```
+
+The result is a **single file with nothing external in it** — no CDN, no fonts,
+no network at all. Mail it, commit it, or open it on a robot with no route out.
+
+It does not draw the whole graph at once, because a full ROS workspace drawn all
+at once is a hairball nobody reads twice. Instead you are always looking at one
+package's neighbourhood:
+
+| | |
+|---|---|
+| **Click** a package | re-centre the graph on it |
+| **Hover** | light up everything upstream and downstream of it, dim the rest |
+| **Shift-click** | pin a second package and list the shortest paths between the two — `rostree why`, drawn |
+| `/` | search; arrows and enter to jump |
+| `d` `u` `b` | dependencies · dependents · both |
+| `[` `]` | fewer or more hops |
+| `f` / `r` / `t` / `?` | fit · back to start · theme · help |
+
+Packages are coloured by where they came from, using the same palette as the
+TUI, so `/opt/ros` and your own workspace are distinguishable at a glance, and
+unresolved names are drawn dashed. The current view lives in the URL, so a
+focused view can be shared by copying the address.
 
 ```bash
 # Single package - render to image (requires Graphviz)
@@ -119,6 +151,7 @@ rostree graph rclpy --render pdf -o out.pdf
 # Single package - text output
 rostree graph rclpy                    # DOT format to stdout
 rostree graph rclpy -f mermaid         # Mermaid format
+rostree graph rclpy -f html -o d.html  # Interactive, self-contained
 rostree graph rclpy -o deps.dot        # Write DOT to file
 rostree graph rclpy -d 3               # Limit depth
 

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rostree graph -f html`** — an interactive dependency graph in a single
+  self-contained file. No CDN, no fonts, no network of any kind, so it works
+  attached to a bug report, committed next to a design doc, or opened on a robot
+  with no route out.
+
+  It never draws the whole graph at once, because a workspace drawn all at once
+  is a hairball nobody reads twice. You are always looking at one package's
+  neighbourhood: click to re-centre, hover to light up everything upstream and
+  downstream of a package, shift-click to pin a second one and list the shortest
+  paths between them — `rostree why`, drawn. `/` searches, `d`/`u`/`b` switch
+  between dependencies, dependents and both, `[`/`]` change the depth. Packages
+  are coloured by source using the TUI's palette, unresolved names are dashed,
+  and the current view lives in the URL so it can be shared by copying the
+  address.
+
+  Layout is a layered DAG built in the page — layer assignment, dummy nodes for
+  long edges, crossing reduction, then coordinate straightening — rather than a
+  force-directed blob, because dependencies have a direction and reading order
+  should reflect it.
+
+### Changed
+
+- The demo reel and README were rebuilt around the current feature set: scope
+  filters, `diff`, `check --junit` and the HTML graph, with the TUI screens
+  recaptured. The before/after timings were re-measured against `rostree` 0.2.2
+  installed from PyPI rather than carried over, and
+  [`docs/media/README.md`](docs/media/README.md) records exactly what in the reel
+  is a real capture and what is a synthetic workspace.
+
 ## [0.4.0] - 2026-08-08
 
 v0.3.0 made big trees fast. This one makes them *yours*: on a sourced ROS 2

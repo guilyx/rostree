@@ -40,6 +40,7 @@ from rostree.core.tree import (
     build_dependency_tree,
     tree_stats,
 )
+from rostree.core.webview import to_html
 
 # Historical status markers, still recognised on nodes built by older callers.
 _LEGACY_MARKERS = {
@@ -1036,11 +1037,22 @@ def cmd_graph(args: argparse.Namespace) -> int:
             "drawn dashed. Use --hide-missing to omit them.[/]"
         )
 
-    output = to_mermaid(view) if getattr(args, "format", "dot") == "mermaid" else to_dot(view)
+    fmt = getattr(args, "format", "dot")
+
+    if fmt == "html":
+        if getattr(args, "render", None):
+            _err.print(
+                "[red]Error:[/] --render rasterises DOT with Graphviz; "
+                "the HTML output is already interactive. Drop one of them."
+            )
+            return 2
+        return _write_html_graph(args, graph, index, title)
+
+    output = to_mermaid(view) if fmt == "mermaid" else to_dot(view)
 
     render_format = getattr(args, "render", None)
     if render_format:
-        if getattr(args, "format", "dot") == "mermaid":
+        if fmt == "mermaid":
             print(
                 "Error: --render only works with DOT format (not mermaid). "
                 "Remove -f mermaid or use mermaid.live for rendering.",
@@ -1098,6 +1110,57 @@ def cmd_graph(args: argparse.Namespace) -> int:
     else:
         print(output)
 
+    return 0
+
+
+def _default_graph_name(args: argparse.Namespace) -> str:
+    """A filename that says what the graph is of, without the caller naming one."""
+    if getattr(args, "package", None):
+        return args.package.replace("/", "_")
+    if getattr(args, "workspace", None):
+        return Path(args.workspace).name
+    return "workspace_deps"
+
+
+def _write_html_graph(
+    args: argparse.Namespace,
+    graph: DependencyGraph,
+    index: PackageIndex,
+    title: str | None,
+) -> int:
+    """Write the interactive viewer, and say where it went."""
+    out_path = Path(getattr(args, "output", None) or f"{_default_graph_name(args)}.html")
+    if out_path.suffix.lower() != ".html":
+        out_path = out_path.with_suffix(".html")
+
+    scope = []
+    if getattr(args, "only_workspace", False):
+        scope.append("workspace only")
+    if getattr(args, "dep_type", None):
+        scope.append(f"{args.dep_type} deps")
+    elif getattr(args, "runtime", False):
+        scope.append("runtime deps")
+    if getattr(args, "depth", None) is not None:
+        scope.append(f"depth {args.depth}")
+
+    html = to_html(
+        graph,
+        index=index,
+        title=title or "rostree dependency graph",
+        show_missing=not getattr(args, "hide_missing", False),
+        subtitle="  ·  ".join(scope) or None,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(html, encoding="utf-8")
+
+    size_kb = out_path.stat().st_size / 1024
+    _err.print(
+        f"[green]✓[/] Interactive graph written to [bold]{out_path}[/] "
+        f"[dim]({size_kb:.0f} KB, {len(graph.packages)} packages — open it in any browser, "
+        "no network needed)[/]"
+    )
+    if getattr(args, "open", False):
+        _open_file(out_path)
     return 0
 
 
@@ -1400,9 +1463,12 @@ def main(argv: list[str] | None = None) -> int:
     graph_parser.add_argument(
         "-f",
         "--format",
-        choices=["dot", "mermaid"],
+        choices=["dot", "mermaid", "html"],
         default="dot",
-        help="Output format: dot (Graphviz) or mermaid (default: dot)",
+        help=(
+            "Output format: dot (Graphviz), mermaid, or html for a self-contained "
+            "interactive viewer (default: dot)"
+        ),
     )
     graph_parser.add_argument(
         "-o", "--output", metavar="FILE", help="Output file (default: stdout)"

@@ -12,9 +12,11 @@ rostree/
 │   │   ├── parser.py     # package.xml parsing (memoized)
 │   │   ├── tree.py       # DependencyGraph + DependencyNode
 │   │   ├── graph.py      # DOT / Mermaid generation
-│   │   └── junit.py      # JUnit report for `rostree check --junit`
+│   │   ├── junit.py      # JUnit report for `rostree check --junit`
+│   │   └── webview.py    # Interactive HTML graph (inlines web/)
 │   ├── api.py            # Public API
 │   ├── cli.py            # Command line interface
+│   ├── web/              # graph.html/.css/.js — the viewer, shipped as data
 │   └── tui/              # Textual TUI
 ├── tests/                # pytest (incl. TUI pilot tests)
 ├── pyproject.toml
@@ -130,6 +132,36 @@ through Textual's pilot harness (key presses, background workers, lazy expansion
 rather than testing helpers in isolation. `tests/conftest.py` clears the package
 index and parse caches between tests — they are process-wide by design, so tests
 must not share them.
+
+## The HTML graph viewer
+
+`src/rostree/web/` holds real `.html`, `.css` and `.js` files rather than Python
+strings, so they can be edited and diffed like the front-end code they are.
+`core/webview.py` inlines all three into one document at generation time.
+
+There is no build step and no dependency, on purpose: the output has to work
+from a `file://` URL with no network, which rules out a CDN, and vendoring a
+layout library to avoid one would be a worse trade than the ~200 lines of
+layered-DAG layout in `graph.js`.
+
+To work on it, generate a page and open it:
+
+```bash
+rostree graph nav2_bringup -f html -o /tmp/g.html && xdg-open /tmp/g.html
+```
+
+Two things that are easy to get wrong and have already bitten:
+
+- **Do not call `setPointerCapture` on the canvas.** Chromium retargets the
+  compatibility mouse events to the capturing element, so every `click` arrives
+  on the `<svg>` and no node is ever clickable. Pan by listening on `window`.
+- **`[hidden]` needs `display: none !important`**, because several of the things
+  it is applied to set an explicit `display` further down the stylesheet.
+
+`tests/test_webview.py` covers the payload and the document — that it is
+self-contained, that no placeholder survives, and that a `</script>` in a
+package description cannot break out of the data block. Behaviour inside the
+page is not unit-tested; check it in a browser.
 
 ## Docs
 
