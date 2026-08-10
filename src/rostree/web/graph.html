@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>/*{{STYLE}}*/</style>
+</head>
+<body>
+<div id="app" data-loading>
+  <header id="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="mark">
+        <path d="M12 3v5M12 8L6 13M12 8l6 5M6 13v3M18 13v3" />
+        <circle cx="12" cy="3" r="2" /><circle cx="6" cy="17" r="2" /><circle cx="18" cy="17" r="2" />
+      </svg>
+      <div class="titles">
+        <h1 id="title"></h1>
+        <p id="subtitle"></p>
+      </div>
+    </div>
+
+    <div class="search-wrap">
+      <input id="search" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search packages…   (press /)" aria-label="Search packages">
+      <ul id="suggestions" role="listbox" hidden></ul>
+    </div>
+
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Direction">
+        <button data-dir="down" class="on" title="Dependencies — what this pulls in (d)">Needs</button>
+        <button data-dir="up" title="Dependents — what breaks if this changes (u)">Used by</button>
+        <button data-dir="both" title="Both directions (b)">Both</button>
+      </div>
+      <label class="depth" title="How many hops to show ([ and ])">
+        <span>Depth</span>
+        <input id="depth" type="range" min="1" max="8" step="1" value="2">
+        <output id="depthOut">2</output>
+      </label>
+      <button id="themeBtn" class="icon" title="Toggle theme">◐</button>
+      <button id="helpBtn" class="icon" title="Keyboard shortcuts (?)">?</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="stage">
+      <svg id="canvas" role="img" aria-label="Dependency graph"></svg>
+      <div id="empty" hidden></div>
+      <div id="legend"></div>
+      <div id="hint">Click a package to re-centre  ·  hover to trace  ·  shift-click for a second pin</div>
+    </div>
+    <aside id="panel"></aside>
+  </main>
+
+  <div id="help" hidden>
+    <div class="sheet">
+      <h2>Keyboard</h2>
+      <dl>
+        <dt>/</dt><dd>Search packages</dd>
+        <dt>Esc</dt><dd>Clear search, pins and selection</dd>
+        <dt>d / u / b</dt><dd>Dependencies · dependents · both</dd>
+        <dt>[ / ]</dt><dd>Fewer or more hops</dd>
+        <dt>f</dt><dd>Fit the graph to the window</dd>
+        <dt>r</dt><dd>Back to the starting package</dd>
+        <dt>t</dt><dd>Toggle theme</dd>
+        <dt>?</dt><dd>This help</dd>
+      </dl>
+      <h2>Mouse</h2>
+      <dl>
+        <dt>Hover</dt><dd>Trace every path through a package</dd>
+        <dt>Click</dt><dd>Re-centre the graph on it</dd>
+        <dt>Shift-click</dt><dd>Pin a second package and show the routes between them</dd>
+        <dt>Drag / scroll</dt><dd>Pan and zoom</dd>
+      </dl>
+      <button id="helpClose">Close</button>
+    </div>
+  </div>
+</div>
+<script id="graph-data" type="application/json">/*{{DATA}}*/</script>
+<script>/*{{SCRIPT}}*/</script>
+</body>
+</html>

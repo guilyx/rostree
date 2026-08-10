@@ -65,9 +65,9 @@ rostree why nav2_bringup rcutils   # How did this get into my tree?
 rostree rdeps rclcpp               # What depends on this package?
 rostree check                      # Cycles + unresolved deps (non-zero exit for CI)
 
+rostree graph rclcpp -f html --open     # Interactive, one self-contained file
 rostree graph rclcpp --render png       # PNG via Graphviz
-rostree graph rclcpp --render svg --open
-rostree graph -w ~/ros2_ws --render png # Whole workspace
+rostree graph -w ~/ros2_ws -f html      # Whole workspace, explorable
 rostree graph rclcpp -f mermaid         # Mermaid text
 ```
 
