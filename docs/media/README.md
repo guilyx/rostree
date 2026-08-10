@@ -4,11 +4,11 @@
 |------|-----------|
 | `rostree-demo.gif` | 27 s loop used in the project README |
 | `rostree-demo.mp4` | 79 s promo reel — the full cut |
-
-Neither names a version number, so neither goes stale on release day.
-
 | `graph-html.png`, `graph-html-light.png` | The interactive HTML graph, both themes |
 | `tui-packages.png`, `tui-tree.png`, `tui-dependents.png` | TUI screens |
+
+Neither the reel nor the GIF names a version number, so neither goes stale on
+release day.
 
 ## What is real in them, and what is not
 
