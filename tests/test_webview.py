@@ -194,3 +194,174 @@ class TestGraphCommand:
         stack(tmp_path)
         with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
             assert cmd_graph(self._args(tmp_path, render="png")) == 2
+
+
+class TestAwkwardInput:
+    """Cases the payload has to describe honestly rather than drop."""
+
+    def test_an_unparsable_manifest_is_reported_not_hidden(self, tmp_path: Path) -> None:
+        """The file is there and names a package, but is not valid XML."""
+        write_package(tmp_path, "app", depends=["broken"])
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        broken.joinpath("package.xml").write_text(
+            """<?xml version="1.0"?>
+<package format="3">
+  <name>broken</name>
+  <version>1.0.0</version>
+  <unclosed>
+</package>
+"""
+        )
+        nodes = graph_payload(graph_for(tmp_path))["nodes"]
+        assert "broken" in nodes, "a package that fails to parse must still be drawn"
+        assert nodes["broken"]["kind"] == "missing"
+        assert "could not be parsed" in nodes["broken"]["error"]
+
+    def test_subtitle_is_carried_into_the_page(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        html = to_html(graph_for(tmp_path), subtitle="workspace only  ·  depth 2")
+        blob = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>', html, re.S
+        )
+        assert json.loads(blob.group(1).replace("<\\/", "</"))["subtitle"] == (
+            "workspace only  ·  depth 2"
+        )
+
+    def test_no_subtitle_means_no_key(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        assert "subtitle" not in graph_payload(graph_for(tmp_path))
+
+
+class TestOutputNaming:
+    """`_default_graph_name` decides the filename when the caller does not."""
+
+    def test_named_after_the_package(self) -> None:
+        import argparse
+
+        from rostree.cli import _default_graph_name
+
+        args = argparse.Namespace(package="nav2_bringup", workspace=None)
+        assert _default_graph_name(args) == "nav2_bringup"
+
+    def test_a_slash_in_the_name_cannot_escape_the_directory(self) -> None:
+        import argparse
+
+        from rostree.cli import _default_graph_name
+
+        args = argparse.Namespace(package="a/b", workspace=None)
+        assert "/" not in _default_graph_name(args)
+
+    def test_named_after_the_workspace(self) -> None:
+        import argparse
+
+        from rostree.cli import _default_graph_name
+
+        args = argparse.Namespace(package=None, workspace="/home/me/ros2_ws")
+        assert _default_graph_name(args) == "ros2_ws"
+
+    def test_falls_back_when_neither_is_given(self) -> None:
+        import argparse
+
+        from rostree.cli import _default_graph_name
+
+        args = argparse.Namespace(package=None, workspace=None)
+        assert _default_graph_name(args) == "workspace_deps"
+
+
+class TestScopeSubtitle:
+    """The page says what was filtered out of it."""
+
+    def _subtitle(self, tmp_path: Path, out: Path) -> str:
+        blob = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            out.read_text(),
+            re.S,
+        )
+        return json.loads(blob.group(1).replace("<\\/", "</")).get("subtitle", "")
+
+    def _run(self, tmp_path: Path, **overrides) -> Path:
+        import argparse
+
+        from rostree.cli import cmd_graph
+
+        out = tmp_path / "g.html"
+        base = dict(
+            package="app",
+            workspace=None,
+            format="html",
+            output=str(out),
+            depth=None,
+            runtime=False,
+            dep_type=None,
+            source=[str(tmp_path)],
+            include=None,
+            exclude=None,
+            only_workspace=False,
+            hide_missing=False,
+            no_title=False,
+            render=None,
+            open=False,
+            json=False,
+        )
+        base.update(overrides)
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            assert cmd_graph(argparse.Namespace(**base)) == 0
+        return out
+
+    def test_records_depth_and_dep_type(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        out = self._run(tmp_path, depth=2, dep_type="runtime")
+        subtitle = self._subtitle(tmp_path, out)
+        assert "runtime deps" in subtitle
+        assert "depth 2" in subtitle
+
+    def test_records_runtime_shorthand(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        assert "runtime deps" in self._subtitle(tmp_path, self._run(tmp_path, runtime=True))
+
+    def test_records_workspace_scope(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        assert "workspace only" in self._subtitle(
+            tmp_path, self._run(tmp_path, only_workspace=True)
+        )
+
+    def test_unscoped_graph_has_no_subtitle(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        assert self._subtitle(tmp_path, self._run(tmp_path)) == ""
+
+    def test_open_hands_the_written_file_to_the_system(self, tmp_path: Path) -> None:
+        """`--open` must open the page it just wrote, not the name it was asked for."""
+        import argparse
+
+        from rostree.cli import cmd_graph
+
+        stack(tmp_path)
+        target = tmp_path / "graph.txt"
+        with mock.patch("rostree.cli._open_file") as opener:
+            with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+                assert (
+                    cmd_graph(
+                        argparse.Namespace(
+                            package="app",
+                            workspace=None,
+                            format="html",
+                            output=str(target),
+                            depth=None,
+                            runtime=False,
+                            dep_type=None,
+                            source=[str(tmp_path)],
+                            include=None,
+                            exclude=None,
+                            only_workspace=False,
+                            hide_missing=False,
+                            no_title=False,
+                            render=None,
+                            open=True,
+                            json=False,
+                        )
+                    )
+                    == 0
+                )
+        opener.assert_called_once()
+        assert opener.call_args[0][0] == tmp_path / "graph.html"
