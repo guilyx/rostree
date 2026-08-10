@@ -33,6 +33,11 @@ stays as an accepted spelling of `--only-workspace`.
 **What it does not commit to.** The exact text and layout rostree prints. Output
 is for people; pin `--json` if you are parsing it.
 
+A [launch reel](docs/media/rostree-1.0.mp4) goes with the release. Like the
+evergreen one it is all real capture — actual command output, the TUI in a pty,
+the graph page screen-recorded — and it ends on the same caveat below rather than
+on a claim.
+
 **What is still missing**, stated plainly rather than left for you to discover:
 the suite has never run against a real ROS 2 installation. Every test uses
 generated fixtures, and the `<ws>/install/src` bug fixed in 0.3.0 had shipped in
