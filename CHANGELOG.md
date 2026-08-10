@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   force-directed blob, because dependencies have a direction and reading order
   should reflect it.
 
+### Changed
+
+- The demo reel and README were rebuilt around the current feature set: scope
+  filters, `diff`, `check --junit` and the HTML graph, with the TUI screens
+  recaptured. The before/after timings were re-measured against `rostree` 0.2.2
+  installed from PyPI rather than carried over, and
+  [`docs/media/README.md`](docs/media/README.md) records exactly what in the reel
+  is a real capture and what is a synthetic workspace.
+
 ## [0.4.0] - 2026-08-08
 
 v0.3.0 made big trees fast. This one makes them *yours*: on a sourced ROS 2
