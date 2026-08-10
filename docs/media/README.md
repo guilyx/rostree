@@ -7,6 +7,9 @@
 | `graph-html.png`, `graph-html-light.png` | The interactive HTML graph, both themes |
 | `tui-packages.png`, `tui-tree.png`, `tui-dependents.png` | TUI screens |
 
+Neither the reel nor the GIF names a version number, so neither goes stale on
+release day.
+
 ## What is real in them, and what is not
 
 **The terminal output is real.** Every command in the reel was executed against the

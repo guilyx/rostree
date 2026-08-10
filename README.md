@@ -156,6 +156,23 @@ print(graph.cycles(), sorted(graph.missing))
 print(reverse_dependencies("rclcpp"))    # who depends on it
 ```
 
+## Stability
+
+From 1.0, the **CLI commands and their flags** and the names exported from
+**`rostree.api`** follow semantic versioning: no incompatible changes without a
+2.0. Anything under `rostree.core` is internal and may move.
+
+The exact text and layout rostree prints is *not* covered — output is for people.
+Pin `--json` if you are parsing it.
+
+One thing worth knowing before you rely on it: the test suite runs entirely on
+generated fixtures and has never been exercised against a real ROS 2 install. The
+`<ws>/install/src` bug fixed in 0.3.0 had shipped in every release before it for
+exactly that reason. Running against a `ros:jazzy` container is the top roadmap
+item. 1.0 means the interface has settled, not that every layout in the wild is
+covered — [please open an issue](https://github.com/guilyx/rostree/issues) if
+yours is not.
+
 ## Links
 
 - [How the system works](docs/overview.md)
