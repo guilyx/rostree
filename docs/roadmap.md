@@ -1,6 +1,6 @@
 # rostree Roadmap
 
-Last reviewed after **v0.4.0** shipped. The original roadmap came out of
+Last reviewed at **1.0**. The original roadmap came out of
 [the code review](./review.md); this version records what shipped, what was
 dropped and why, and what is worth doing next.
 
@@ -59,9 +59,9 @@ workspace.
 The theme was **scoping**. On a sourced ROS 2 machine most of what rostree prints
 belongs to the distro, not to you, and there was no way to say so.
 
-4.1 and 4.2 shipped whole; 4.3 shipped except the composite Action. 4.4 and 4.5
-did not start and have moved to v0.5.0 below rather than being left here looking
-like part of a finished release.
+4.1 and 4.2 shipped whole; 4.3 shipped except the composite Action. The
+configuration file and the `rostree.exceptions` work did not start and moved on
+rather than being left here looking like part of a finished release.
 
 ### 4.1 Scope and filtering — ✅ shipped
 - [x] `--only-workspace` — exclude packages installed under `/opt/ros`
@@ -94,9 +94,32 @@ work is recorded here:
 
 ---
 
-## Next: v0.5.0 — confidence
+## Shipped in v1.0.0
 
-### 5.0 Carried over from v0.4.0
+`rostree graph -f html` — the graph in a browser, as one self-contained file.
+Not on any earlier list; it came out of asking what a dependency viewer would
+have to do for someone to open it twice.
+
+- [x] A layered DAG layout computed in the page, so dependencies read in their
+      actual direction instead of settling into a force-directed blob
+- [x] Focus-first: click to re-centre, hover to trace, shift-click to pin a
+      second package and list the shortest paths between the two
+- [x] Search, direction and depth controls, source colouring matching the TUI,
+      and the view encoded in the URL so it can be shared
+- [x] No CDN, no fonts, no network — it opens from `file://` on a robot
+- [x] Demo reel and README rebuilt around the current feature set, with the
+      before/after timings re-measured rather than carried over
+
+**1.0 is a statement about the interface, not about coverage.** The CLI flags and
+`rostree.api` are now under semver. What has *not* changed is that every test runs
+on generated fixtures — which is why 5.1 below is the top item and not a
+nice-to-have.
+
+---
+
+## Next: v1.1 — confidence
+
+### 1.1.0 Carried over
 - [ ] A composite GitHub Action wrapping `rostree check`
 - [ ] Configuration file: `[tool.rostree]` in `pyproject.toml` and `.rostreerc`
       (TOML), defaults for depth, dependency scope and filters, CLI arguments
@@ -104,19 +127,23 @@ work is recorded here:
 - [ ] `rostree.exceptions` with `PackageNotFoundError`, `ManifestError`, and
       optional logging behind `--debug`
 
-### 5.1 Integration tests against real ROS 2
+### 1.1.1 Integration tests against real ROS 2 — **the top item**
 - [ ] Run the suite in a `ros:jazzy` container in CI
 - [ ] Assert against real packages (`rclcpp`, `nav2_bringup`) rather than fixtures
+- [ ] Cover both colcon layouts, merged and isolated, on a real install
 - [ ] A benchmark test that fails if tree building goes superlinear again
 
-The highest-confidence item on the list: the `<ws>/install/src` bug lived in the
-code for every release so far, and no fixture-based test could have caught it.
+Everything rostree knows about how a ROS 2 workspace is laid out is currently
+asserted against workspaces rostree itself generated. The `<ws>/install/src` bug
+shipped in every release up to 0.3.0 for exactly that reason, and nothing in the
+suite would catch the next one of its kind. Shipping 1.0 raises the cost of that
+gap rather than lowering it.
 
-### 5.2 SBOM export
+### 1.1.2 SBOM export
 - [ ] CycloneDX output for a package or a whole workspace
 - [ ] Include unresolved rosdep keys as external references
 
-### 5.3 Split the CLI module
+### 1.1.3 Split the CLI module
 - [x] `core/junit.py` — carved out in v0.4.0 because the security scanners needed
       one place to be told the JUnit writer only ever *writes* XML
 - [ ] `cli.py` is still ~1,470 lines; split the rest into `cli/commands/*.py`
@@ -127,7 +154,7 @@ Deliberately late: mostly churn with no user-visible benefit, so it should follo
 the features rather than block them. The one piece done so far was pulled out for
 a concrete reason, which is the bar the rest should meet too.
 
-### 5.4 Distribution
+### 1.1.4 Distribution
 - [ ] Publish to the ROS 2 package index
 - [ ] conda-forge package
 

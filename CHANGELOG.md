@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-10
+
+The interface has been through three releases of hard changes — trees stopped
+being exponential in 0.3.0, scope filters and `diff` arrived in 0.4.0, and the
+graph moved into the browser here. It has settled, so this marks it.
+
+**What 1.0 commits to.** The CLI commands and their flags, and the names exported
+from `rostree.api`, follow semantic versioning from here: they will not change
+incompatibly without a 2.0.
+
+```python
+from rostree.api import (
+    build_tree, build_graph, get_index, tree_stats, reverse_dependencies,
+    list_known_packages, list_known_packages_by_source, get_package_info,
+    scan_workspaces,
+    DependencyGraph, DependencyNode, NodeStatus,
+    PackageEntry, PackageIndex, PackageInfo, SourceKind, WorkspaceInfo,
+)
+```
+
+Anything under `rostree.core` is internal and may move. `rdeps --workspace-only`
+stays as an accepted spelling of `--only-workspace`.
+
+**What it does not commit to.** The exact text and layout rostree prints. Output
+is for people; pin `--json` if you are parsing it.
+
+**What is still missing**, stated plainly rather than left for you to discover:
+the suite has never run against a real ROS 2 installation. Every test uses
+generated fixtures, and the `<ws>/install/src` bug fixed in 0.3.0 had shipped in
+every release before it precisely because no fixture could catch it. Running
+against a `ros:jazzy` container is the top item on the roadmap, and until it is
+done, 1.0 means "the interface is settled", not "every layout in the wild is
+covered".
+
 ### Added
 
 - **`rostree graph -f html`** — an interactive dependency graph in a single
@@ -295,7 +329,8 @@ them near-instant and reworks the interface around them.
 - Python 3.10+
 - textual >= 0.47.0
 
-[Unreleased]: https://github.com/guilyx/rostree/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/guilyx/rostree/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/guilyx/rostree/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/guilyx/rostree/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guilyx/rostree/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/guilyx/rostree/compare/v0.2.1...v0.2.2
