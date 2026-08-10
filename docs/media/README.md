@@ -4,11 +4,15 @@
 |------|-----------|
 | `rostree-demo.gif` | 27 s loop used in the project README |
 | `rostree-demo.mp4` | 79 s promo reel — the full cut |
+| `rostree-1.0.gif` | 22 s loop for the 1.0 release announcement |
+| `rostree-1.0.mp4` | 71 s 1.0 launch reel |
 | `graph-html.png`, `graph-html-light.png` | The interactive HTML graph, both themes |
 | `tui-packages.png`, `tui-tree.png`, `tui-dependents.png` | TUI screens |
 
-Neither the reel nor the GIF names a version number, so neither goes stale on
-release day.
+`rostree-demo.*` names no version, so it stays correct as the README asset
+release after release. `rostree-1.0.*` is the launch cut and is meant to date:
+it opens on 1.0 and closes on what 1.0 does and does not promise. Both are built
+from the same captures.
 
 ## What is real in them, and what is not
 
