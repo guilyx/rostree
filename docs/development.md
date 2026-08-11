@@ -21,7 +21,8 @@ rostree/
 ├── tests/                # pytest (incl. TUI pilot tests)
 ├── pyproject.toml
 ├── .pre-commit-config.yaml
-└── .github/workflows/    # CI and publish
+├── mkdocs.yml            # Docs site config (published to GitHub Pages)
+└── .github/workflows/    # CI, docs and publish
 ```
 
 ## Install (dev)
@@ -117,6 +118,7 @@ not a stale suppression.
 ## CI
 
 - **ci.yml** — lint (ruff, black, bandit) plus pytest with coverage on Python 3.10–3.12.
+- **docs.yml** — build the site with `--strict`, and deploy it to GitHub Pages from `main`.
 - **publish.yml** — Build and publish to PyPI on release (Trusted Publishing).
 
 CI runs on every push/PR to main/master.
@@ -165,11 +167,36 @@ page is not unit-tested; check it in a browser.
 
 ## Docs
 
-- **docs/README.md** — Index of all docs.
+`docs/` is a [MkDocs](https://www.mkdocs.org/) site using
+[Material](https://squidfunk.github.io/mkdocs-material/), published to
+<https://guilyx.github.io/rostree> by `docs.yml` on every push to `main`.
+
+```bash
+pip install -e ".[docs]"
+mkdocs serve          # live reload on http://127.0.0.1:8000
+mkdocs build --strict # what CI runs
+```
+
+- **docs/index.md** — Site home.
 - **docs/overview.md** — System overview and data flow.
 - **docs/package-discovery.md** — How packages are found (env vars, workspaces).
 - **docs/dependency-trees.md** — parsing, the package index, repeat collapsing, graphs.
 - **docs/usage.md** — CLI, TUI keys, Python API.
 - **docs/development.md** — This file.
+- **docs/changelog.md** — a one-line page that pulls in the root `CHANGELOG.md`, so
+  the changelog is written in exactly one place.
+
+Two things the build enforces, both worth knowing before a PR fails on them:
+
+- **`strict: true`.** A link that resolves to nothing is a build failure, not a
+  warning. Anything the site links to has to exist inside `docs/` — a
+  repo-relative path like `../src/rostree/cli.py` will not resolve, so link to
+  the file on GitHub by full URL instead. That is why the three such links inside
+  `CHANGELOG.md` are absolute: they have to work both on the site and in the
+  file itself.
+- **`docs/review.md` is excluded** (`exclude_docs` in `mkdocs.yml`). It is the
+  pre-0.3 code audit, kept as a record; most of what it reports is fixed, and
+  publishing it as current documentation would mislead. `roadmap.md` therefore
+  links to it on GitHub rather than as a page.
 
 Keep the root **README.md** lean; link to these docs for details.

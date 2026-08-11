@@ -1,0 +1,86 @@
+name: Docs
+
+# GitHub Actions does not support YAML anchors, so the two path filters below are
+# written out twice on purpose. Keep them identical: a path that builds on a pull
+# request but does not deploy on main leaves the published site quietly stale.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'CHANGELOG.md'          # embedded into docs/changelog.md as a snippet
+      - 'pyproject.toml'        # carries the `docs` extra
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'CHANGELOG.md'
+      - 'pyproject.toml'
+      - '.github/workflows/docs.yml'
+  # So the site can be republished without an empty commit.
+  workflow_dispatch:
+
+# One deployment at a time, and never cancel one half-way through — Pages keeps
+# serving the previous build while this runs, so there is nothing to gain by
+# interrupting it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -e ".[docs]"
+
+      # `strict: true` is already set in mkdocs.yml; passing it again here means
+      # the workflow says out loud that a dead link fails the build rather than
+      # publishing a page that links to nothing.
+      - name: Build
+        run: mkdocs build --strict
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # Pull requests get the build as a required check; only main is published.
+    # This also keeps the write permissions below off fork pull requests.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # Switches the repository's Pages source to GitHub Actions if it is not set
+      # already, so the first deployment does not need someone to visit Settings.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

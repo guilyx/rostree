@@ -86,6 +86,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# MkDocs build output
+site/
+
 # Misc
 *.log
 .cache/

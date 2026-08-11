@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The `docs/` folder is now published as a documentation site at
+  <https://guilyx.github.io/rostree>, built with MkDocs and Material and deployed
+  by a `docs.yml` workflow on every push to `main`. The build runs with
+  `--strict` and with anchor validation on, so a dead link or a heading that was
+  renamed out from under a `#section` link fails CI instead of shipping. Pull
+  requests that touch the docs get the build as a check but do not deploy.
+- `docs/changelog.md` embeds this file rather than restating it, so the changelog
+  is still written in exactly one place.
+
 ## [1.0.0] - 2026-08-10
 
 The interface has been through three releases of hard changes — trees stopped
@@ -33,7 +43,7 @@ stays as an accepted spelling of `--only-workspace`.
 **What it does not commit to.** The exact text and layout rostree prints. Output
 is for people; pin `--json` if you are parsing it.
 
-A [launch reel](docs/media/rostree-1.0.mp4) goes with the release. Like the
+A [launch reel](https://github.com/guilyx/rostree/blob/main/docs/media/rostree-1.0.mp4) goes with the release. Like the
 evergreen one it is all real capture — actual command output, the TUI in a pty,
 the graph page screen-recorded — and it ends on the same caveat below rather than
 on a claim.
@@ -74,7 +84,7 @@ covered".
   filters, `diff`, `check --junit` and the HTML graph, with the TUI screens
   recaptured. The before/after timings were re-measured against `rostree` 0.2.2
   installed from PyPI rather than carried over, and
-  [`docs/media/README.md`](docs/media/README.md) records exactly what in the reel
+  [`docs/media/README.md`](https://github.com/guilyx/rostree/blob/main/docs/media/README.md) records exactly what in the reel
   is a real capture and what is a synthetic workspace.
 
 ## [0.4.0] - 2026-08-08
@@ -110,7 +120,7 @@ was no way to say so.
   pull requests instead of it existing only in a dashboard. `.codacy.yaml` records
   which rules are switched off for the test suite and why; accepted findings under
   `src/` carry an inline suppression with its reason, and
-  [development.md](docs/development.md#static-analysis) writes down where those
+  [development.md](https://github.com/guilyx/rostree/blob/main/docs/development.md#static-analysis) writes down where those
   comments have to sit, which is less obvious than it sounds.
 
 ### Changed
