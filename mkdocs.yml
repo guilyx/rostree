@@ -1,0 +1,104 @@
+site_name: rostree
+site_description: Explore your ROS 2 dependency graph — from the command line, in a TUI, or in your browser.
+site_url: https://guilyx.github.io/rostree/
+repo_url: https://github.com/guilyx/rostree
+repo_name: guilyx/rostree
+edit_uri: edit/main/docs/
+copyright: MIT licensed
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # The site follows the reader's system setting, with a manual override —
+    # the same rule the generated HTML graph uses.
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Follow system
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - content.tooltips
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - How it works:
+      - Overview: overview.md
+      - Package discovery: package-discovery.md
+      - Dependency trees: dependency-trees.md
+  - Project:
+      - Development: development.md
+      - Roadmap: roadmap.md
+      - Changelog: changelog.md
+      - Demo media: media/README.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+exclude_docs: |
+  review.md
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/guilyx/rostree
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/rostree/
+
+# Build failures are better than a site that quietly links to nothing. `anchors`
+# is the one worth the extra strictness: a `page.md#section` that no longer has
+# that heading still renders as a working link and lands the reader at the top of
+# the page, which is exactly the kind of rot nobody notices.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+strict: true

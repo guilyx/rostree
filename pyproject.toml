@@ -29,6 +29,12 @@ viz = [
     "networkx>=3.0",
     "matplotlib>=3.7",
 ]
+docs = [
+    # Capped at the current major: the docs build runs with `strict: true`, so a
+    # theme release that renames a feature flag would turn into a red CI run on an
+    # unrelated pull request. 9.x already caps `mkdocs<2` itself.
+    "mkdocs-material>=9.5,<10",
+]
 dev = [
     "bandit[toml]==1.9.4",
     "black==25.1.0",

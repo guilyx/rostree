@@ -1,7 +1,10 @@
 # rostree Roadmap
 
-Last reviewed at **1.0**. The original roadmap came out of
-[the code review](./review.md); this version records what shipped, what was
+Last reviewed at **1.0**. The original roadmap came out of a
+[code review](https://github.com/guilyx/rostree/blob/main/docs/review.md) written
+against the pre-0.3 codebase — kept in the repository as a record, but left off
+this site, because most of what it reports has since been fixed and reading it as
+current documentation would mislead. This version records what shipped, what was
 dropped and why, and what is worth doing next.
 
 ---
