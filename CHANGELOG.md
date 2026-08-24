@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the before/after timings re-measured against 0.2.2 from PyPI on the same
   workspace —
   [`docs/media/README.md`](https://github.com/guilyx/rostree/blob/main/docs/media/README.md)
-  records what is a real capture and what is a synthetic workspace.
+  records what is a real capture and what is a synthetic workspace. The same
+  footage is composed twice: `rostree-demo.mp4` at 1920×1080 and
+  `rostree-demo-square.mp4` at 1080×1080, for feeds that give a square post more
+  room.
 
 ## [1.0.0] - 2026-08-10
 

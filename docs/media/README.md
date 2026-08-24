@@ -3,7 +3,8 @@
 | File | What it is |
 |------|-----------|
 | `rostree-demo.gif` | 24 s loop used in the project README |
-| `rostree-demo.mp4` | 82 s promo reel — the full cut |
+| `rostree-demo.mp4` | 82 s promo reel — the full cut, 1920×1080 |
+| `rostree-demo-square.mp4` | the same reel at 1080×1080, for feeds that give a square post more room |
 | `rostree-1.0.gif` | 22 s loop for the 1.0 release announcement |
 | `rostree-1.0.mp4` | 71 s 1.0 launch reel |
 | `graph-html.png`, `graph-html-light.png` | The interactive HTML graph, both themes |
@@ -12,6 +13,11 @@
 `rostree-demo.*` names no version, so it stays correct as the README asset release
 after release. `rostree-1.0.*` is the launch cut and is meant to date: it opens on
 1.0 and closes on what 1.0 does and does not promise.
+
+The two `rostree-demo` cuts are the same footage composed twice, not two shoots.
+The terminal card is identical in both; only the canvas around it changes, which is
+why the square one carries the wordmark — it has the headroom and the wide one does
+not.
 
 ## What is real in them, and what is not
 
