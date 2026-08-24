@@ -18,7 +18,7 @@ Explore your ROS 2 dependency graph — from the command line, in a TUI, or in y
 
 ![rostree demo](docs/media/rostree-demo.gif)
 
-*[Full demo reel](docs/media/rostree-demo.mp4) · [how the demo was made](docs/media/README.md)*
+*[Full reel, 82 s](docs/media/rostree-demo.mp4) · [how it was captured](docs/media/README.md)*
 
 **Docs:** <https://guilyx.github.io/rostree> — overview, package discovery, dependency trees, usage, development.
 

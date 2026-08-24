@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/changelog.md` embeds this file rather than restating it, so the changelog
   is still written in exactly one place.
 
+### Changed
+- The demo reel was re-shot as a live session rather than a reconstruction.
+  A `bash` session runs in a pty, commands are typed into it a character at a
+  time, and every byte it writes back is recorded with a timestamp; playback
+  feeds that stream to a VT emulator and photographs the screen at 30 fps. The
+  typing cadence, the pause while the index is built and the scroll are the ones
+  that happened. The TUI is driven with real key presses in the same pty, and the
+  graph is Chromium driving the real `graph.html`. It covers `scan`, scope
+  filters, `why`, `rdeps`, `check`, `diff`, the TUI and the browser graph, with
+  the before/after timings re-measured against 0.2.2 from PyPI on the same
+  workspace —
+  [`docs/media/README.md`](https://github.com/guilyx/rostree/blob/main/docs/media/README.md)
+  records what is a real capture and what is a synthetic workspace.
+
 ## [1.0.0] - 2026-08-10
 
 The interface has been through three releases of hard changes — trees stopped
