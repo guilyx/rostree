@@ -119,6 +119,10 @@ class DependencyGraph:
     unparsable: set[str] = field(default_factory=set)
     #: package name -> shortest distance from any root
     depths: dict[str, int] = field(default_factory=dict)
+    #: names declared by a package at the ``max_depth`` boundary, and so never
+    #: resolved or expanded. They appear as edge targets but are neither in
+    #: ``packages`` nor in ``missing``: not walked is not the same as not found.
+    truncated: set[str] = field(default_factory=set)
 
     @property
     def node_count(self) -> int:
@@ -222,6 +226,9 @@ def build_dependency_graph(
         if on_progress is not None:
             on_progress(len(graph.packages), name)
         if max_depth is not None and depth >= max_depth:
+            # Breadth-first, so anything not seen by now is genuinely deeper than
+            # the limit rather than reachable by some shorter route still queued.
+            graph.truncated.update(d for d in deps if d not in graph.depths)
             continue
         for dep in deps:
             if dep not in graph.depths:

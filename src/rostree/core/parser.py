@@ -9,6 +9,13 @@ from defusedxml import DefusedXmlException
 from defusedxml.ElementTree import ParseError
 from defusedxml.ElementTree import parse as parse_xml
 
+from rostree.core.conditions import (
+    ConditionError,
+    condition_context,
+    context_key,
+    evaluate_condition,
+)
+
 # This is the only place in rostree that *reads* XML, so it is the only place
 # where the parser's own behaviour is a security question.
 #
@@ -104,8 +111,11 @@ def quick_package_name(path: Path) -> str | None:
 
 
 # Parsing the same package.xml repeatedly is the single hottest operation when
-# walking a dependency graph, so results are cached by (path, mtime, size, tags).
-_PARSE_CACHE: dict[tuple[str, int, int, tuple[str, ...] | None], PackageInfo | None] = {}
+# walking a dependency graph, so results are cached by (path, mtime, size, tags),
+# plus the variables REP 149 conditions are evaluated against: the same manifest
+# declares different dependencies under ROS_VERSION=1 and ROS_VERSION=2.
+_CacheKey = tuple[str, int, int, "tuple[str, ...] | None", tuple[str, ...]]
+_PARSE_CACHE: dict[_CacheKey, PackageInfo | None] = {}
 
 
 def clear_parse_cache() -> None:
@@ -133,11 +143,11 @@ def parse_package_xml(
 
     Returns None if the file cannot be read or is not valid package.xml.
     """
-    key: tuple[str, int, int, tuple[str, ...] | None] | None = None
+    key: _CacheKey | None = None
     if use_cache:
         try:
             st = path.stat()
-            key = (str(path), int(st.st_mtime_ns), int(st.st_size), include_tags)
+            key = (str(path), int(st.st_mtime_ns), int(st.st_size), include_tags, context_key())
         except OSError:
             return None
         if key in _PARSE_CACHE:
@@ -183,13 +193,22 @@ def _parse_package_xml_uncached(
     deps: list[str] = []
     system_deps: list[str] = []
     dep_tags: dict[str, str] = {}
+    context: dict[str, str] | None = None  # built on the first conditional dependency
     for tag in wanted:
-        for elem in root.findall(f".//{tag}"):
+        # Direct children only: REP 149 places dependency tags directly under
+        # <package>, and <export> is free-form XML that may contain anything.
+        for elem in root.findall(tag):
             if not elem.text:
                 continue
             dep = elem.text.strip()
             if not dep:
                 continue
+            condition = elem.get("condition")
+            if condition is not None:
+                if context is None:
+                    context = condition_context()
+                if not _condition_holds(condition, context):
+                    continue
             if _is_ros_package_dependency(dep):
                 deps.append(dep)
                 dep_tags.setdefault(dep, tag)
@@ -207,3 +226,17 @@ def _parse_package_xml_uncached(
         system_dependencies=system_deps,
         dependency_tags=dep_tags,
     )
+
+
+def _condition_holds(condition: str, context: dict[str, str]) -> bool:
+    """
+    Whether a conditional dependency applies here.
+
+    A condition rostree cannot parse keeps the dependency. Dropping it would make
+    the tree quietly smaller than the manifest says, which is the one outcome this
+    tool is built to avoid; showing one dependency too many is recoverable.
+    """
+    try:
+        return evaluate_condition(condition, context)
+    except ConditionError:
+        return True

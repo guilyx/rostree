@@ -15,6 +15,7 @@ to paste the three pieces together.
 from __future__ import annotations
 
 import json
+import re
 from importlib import resources
 from typing import Any
 
@@ -80,6 +81,27 @@ def graph_payload(
         for child in deps:
             ensure(child)
 
+    # Names past the depth limit were never walked, but most of them exist. The
+    # default above ("missing") would draw every one of them as unresolved and
+    # count it as such, which is false; describe them from the index instead.
+    for name in graph.truncated:
+        node = nodes.get(name)
+        if node is None or name in graph.packages or name in graph.missing:
+            continue
+        entry = index.get(name) if index is not None else None
+        if entry is None:
+            continue  # genuinely unresolved: "missing" is the truth
+        node["kind"] = entry.kind.value
+        node["origin"] = entry.label
+        node["path"] = str(entry.directory)
+        node["truncated"] = True
+        info = index.info(name) if index is not None else None
+        if info is not None:
+            if info.version:
+                node["version"] = info.version
+            if info.description:
+                node["desc"] = info.description
+
     for name in graph.unparsable:
         if name in nodes:
             nodes[name]["kind"] = MISSING_KIND
@@ -96,6 +118,7 @@ def graph_payload(
             "edges": sum(len(n["deps"]) for n in nodes.values()),
             "missing": len([n for n in nodes.values() if n["kind"] == MISSING_KIND]),
             "cycles": len(cycles),
+            "truncated": len([n for n in nodes.values() if n.get("truncated")]),
         },
     }
 
@@ -117,13 +140,20 @@ def to_html(
     # below is the standard defence and survives JSON.parse unchanged.
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
 
-    return (
-        _asset("graph.html")
-        .replace("/*{{STYLE}}*/", _asset("graph.css"))
-        .replace("/*{{DATA}}*/", data)
-        .replace("/*{{SCRIPT}}*/", _asset("graph.js"))
-        .replace("{{TITLE}}", _escape(payload["title"]))
-    )
+    pieces = {
+        "STYLE": _asset("graph.css"),
+        "DATA": data,
+        "SCRIPT": _asset("graph.js"),
+        "TITLE": _escape(payload["title"]),
+    }
+    # One pass over the template, never a chain of .replace() calls. Chained,
+    # each call rescans text the previous one inserted — so a package
+    # description containing "/*{{SCRIPT}}*/" had the whole viewer pasted into
+    # the middle of the JSON, and the page rendered nothing.
+    return _PLACEHOLDER.sub(lambda m: pieces[m.group(1) or m.group(2)], _asset("graph.html"))
+
+
+_PLACEHOLDER = re.compile(r"/\*\{\{(STYLE|DATA|SCRIPT)\}\}\*/|\{\{(TITLE)\}\}")
 
 
 def _escape(text: str) -> str:

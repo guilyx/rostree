@@ -34,6 +34,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rostree-demo-square.mp4` at 1080×1080, for feeds that give a square post more
   room.
 
+### Fixed
+
+These came out of a full code review. Each one has a regression test that fails
+on 1.0.0.
+
+- **Conditional dependencies are honoured** ([REP 149](https://ros.org/reps/rep-0149.html)).
+  `<depend condition="$ROS_VERSION == 1">roscpp</depend>` was collected on a
+  ROS 2 machine, where `roscpp` never resolves — so `rostree check` failed CI for
+  every package that also supports ROS 1. Conditions are now evaluated the way
+  catkin_pkg, colcon and ament do, without ever `eval`-ing manifest text, and a
+  condition rostree cannot parse keeps its dependency rather than dropping it.
+- **Dependency tags nested inside `<export>` are no longer collected.** Only
+  direct children of `<package>` are dependencies.
+- **The ROS distro is recognised wherever it is installed.** It used to be
+  "anything whose path contains `/opt/ros`", which got both directions wrong:
+  `~/opt/ros2_overlay` was treated as the distro (so `--only-workspace` hid your
+  own packages), and a distro built from source, installed with RoboStack into a
+  conda env, or on Windows was treated as *your workspace* (so `--only-workspace`
+  hid nothing and `rostree check` checked the entire distro). A prefix is now the
+  distro if it is under `/opt/ros` by path components, or provides
+  `ros_environment`. An isolated source build is grouped as one source.
+- **The HTML graph no longer calls depth-limited packages "Unresolved".** With
+  `--depth`, every package one hop past the limit was drawn dashed, labelled
+  unresolved and counted as missing, though it resolved fine. They now show as
+  what they are, with a note that they were not expanded; the header counts them
+  separately. `DependencyGraph.truncated` records them for library users.
+- **`rostree scan` no longer reports any folder with a `src/` as a ROS
+  workspace.** It needs a package, or the `COLCON_IGNORE` markers colcon leaves in
+  the `build/`, `install/` and `log/` it creates — which a React or Gradle
+  project's `build/` never has. It also stops descending into `node_modules`,
+  virtualenvs and build output.
+- **A package description can no longer break the HTML graph.** The template's
+  placeholders were filled by chained `.replace()` calls, each rescanning what the
+  last inserted, so a description containing `/*{{SCRIPT}}*/` pasted the whole
+  viewer into the middle of the JSON and the page rendered nothing.
+- **`graph.js` is a text file again.** Three literal NUL bytes, used as a key
+  separator, made git store it as binary — so no change to the viewer's 880 lines
+  of JavaScript has ever shown up in a diff. They are now `\u0000` escapes, which
+  are identical at runtime, and a test keeps them out.
+
 ## [1.0.0] - 2026-08-10
 
 The interface has been through three releases of hard changes — trees stopped

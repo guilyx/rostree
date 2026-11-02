@@ -37,6 +37,25 @@ colcon adds your workspace’s install prefixes to `AMENT_PREFIX_PATH` and/or `C
 
 So “search through the sourced workspace” is correct: it searches through **whatever prefixes are currently in those two variables**.
 
+### Which prefix is "the distro"
+
+`--only-workspace` (`-w`), `rostree check` with no arguments, and the TUI's
+colouring all need to tell the ROS distro apart from your own packages. A prefix
+counts as the distro — `System` in `rostree list --by-source` — when either:
+
+- it is under `/opt/ros`, compared as path components (so `C:\opt\ros\humble`
+  counts on Windows, and `~/opt/ros2_overlay` does **not**); or
+- it provides the `ros_environment` package. Every ROS 2 distro installs it and
+  nothing else does, since it is the package that defines `ROS_VERSION` and
+  `ROS_DISTRO`. This is what recognises a distro built from source, installed
+  with RoboStack into a conda environment, or living anywhere else.
+
+For an isolated colcon layout (`<ws>/install/<pkg>`), where every package is its
+own prefix, rostree looks for a sibling `ros_environment` prefix. Distro packages
+are grouped under one `System (<root>)` label either way, not one per package.
+
+The first non-distro prefix is your `Workspace`; any later ones are `Other`.
+
 ## Source space (unbuilt / source code)
 
 When a package is not in the install space but its source is on disk, the finder can search **source trees**. Source roots are derived in two ways:

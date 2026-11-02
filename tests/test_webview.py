@@ -365,3 +365,79 @@ class TestScopeSubtitle:
                 )
         opener.assert_called_once()
         assert opener.call_args[0][0] == tmp_path / "graph.html"
+
+
+class TestDepthLimit:
+    """Packages past --depth were not walked; that is not the same as not found."""
+
+    def test_names_past_the_limit_are_recorded_as_truncated(self, tmp_path: Path) -> None:
+        stack(tmp_path)  # app -> [core, util]; core -> util; util -> missing_key
+
+        # Depth 0: only app is expanded; both of its dependencies sit past the limit.
+        graph = graph_for(tmp_path, max_depth=0)
+        assert graph.truncated == {"core", "util"}
+        assert graph.missing == set()
+
+        # Depth 1: core and util are on the boundary. util declares missing_key,
+        # which is therefore truncated — never looked up — rather than missing.
+        graph = graph_for(tmp_path, max_depth=1)
+        assert graph.truncated == {"missing_key"}
+        assert graph.missing == set()
+
+    def test_no_limit_truncates_nothing(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        assert graph_for(tmp_path).truncated == set()
+
+    def test_viewer_shows_truncated_packages_as_what_they_are(self, tmp_path: Path) -> None:
+        stack(tmp_path)
+        from rostree.core.index import get_index
+
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            index = get_index(extra_source_roots=[tmp_path])
+            graph = build_dependency_graph(["app"], max_depth=0, index=index)
+            payload = graph_payload(graph, index=index)
+        nodes = payload["nodes"]
+        # Before: both were labelled "Unresolved", drawn dashed, and counted as
+        # missing — on packages that resolve perfectly well.
+        for name in ("core", "util"):
+            assert nodes[name]["kind"] != "missing", name
+            assert nodes[name]["truncated"] is True
+        assert nodes["core"]["version"] == "2.0.0"
+        assert payload["stats"]["missing"] == 0
+        assert payload["stats"]["truncated"] == 2
+
+    def test_a_truly_unresolved_name_past_the_limit_stays_missing(self, tmp_path: Path) -> None:
+        write_package(tmp_path, "leaf_app", depends=["never_built"])
+        from rostree.core.index import get_index
+
+        with mock.patch.dict(os.environ, EMPTY_ENV, clear=False):
+            index = get_index(extra_source_roots=[tmp_path])
+            graph = build_dependency_graph(["leaf_app"], max_depth=0, index=index)
+            nodes = graph_payload(graph, index=index)["nodes"]
+        assert nodes["never_built"]["kind"] == "missing"
+        assert "truncated" not in nodes["never_built"]
+
+
+class TestTemplateSubstitution:
+    def test_a_description_cannot_inject_the_other_placeholders(self, tmp_path: Path) -> None:
+        """Chained .replace() rescanned inserted text and pasted the viewer into the JSON."""
+        write_package(
+            tmp_path, "evil", description="/*{{SCRIPT}}*/ and {{TITLE}} and /*{{STYLE}}*/"
+        )
+        html = to_html(graph_for(tmp_path, "evil"), title="T")
+        data = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>', html, re.S
+        ).group(1)
+        payload = json.loads(data)  # must still be valid JSON
+        assert payload["nodes"]["evil"]["desc"] == "/*{{SCRIPT}}*/ and {{TITLE}} and /*{{STYLE}}*/"
+        assert html.count("<title>T</title>") == 1
+
+
+class TestShippedAssets:
+    def test_web_assets_are_plain_text(self) -> None:
+        """A NUL byte made git store graph.js as binary, hiding every diff to it."""
+        from importlib import resources
+
+        for name in ("graph.html", "graph.css", "graph.js"):
+            data = resources.files("rostree.web").joinpath(name).read_bytes()
+            assert b"\x00" not in data, f"{name} contains a NUL byte"

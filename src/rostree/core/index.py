@@ -42,7 +42,7 @@ _ENV_VARS = ("AMENT_PREFIX_PATH", "COLCON_PREFIX_PATH", "ROS2_WORKSPACE", "COLCO
 class SourceKind(str, Enum):
     """Where a package was found."""
 
-    SYSTEM = "system"  # /opt/ros/<distro> — the ROS distro itself
+    SYSTEM = "system"  # the ROS distro itself — see is_system_prefix()
     WORKSPACE = "workspace"  # first non-system install space — your workspace
     OTHER = "other"  # further install spaces — overlays, third-party
     SOURCE = "source"  # unbuilt packages in a workspace src tree
@@ -73,12 +73,42 @@ def env_paths(env_var: str) -> list[Path]:
     return [Path(p).resolve() for p in value.split(os.pathsep) if p.strip() and Path(p).exists()]
 
 
+#: Installed by every ROS 2 distro and by nothing else: it is the package that
+#: defines ROS_VERSION and ROS_DISTRO. Whichever prefix provides it is the distro.
+_DISTRO_MARKER = Path("share") / "ros_environment" / "package.xml"
+
+
 def is_system_prefix(prefix: Path) -> bool:
-    """True if prefix is under /opt/ros (a ROS distro install)."""
+    """
+    True if ``prefix`` is the ROS distro itself rather than someone's workspace.
+
+    Two signals, either of which is enough:
+
+    - the prefix sits under ``/opt/ros`` (Debian/Ubuntu binaries, and the
+      ``C:\\opt\\ros`` convention on Windows). Compared as path components: a
+      substring test classified ``~/opt/ros2_overlay`` as the distro and hid
+      the user's own packages behind ``--only-workspace``.
+    - the prefix provides ``ros_environment``. That covers every distro that does
+      not live under ``/opt/ros`` — built from source, installed with RoboStack
+      into a conda env, or anywhere else — which used to be reported as the
+      user's workspace, so ``--only-workspace`` filtered nothing.
+    """
     try:
-        return "/opt/ros" in str(prefix.resolve())
+        p = prefix.resolve()
     except OSError:
         return False
+    if [part.lower() for part in p.parts[1:3]] == ["opt", "ros"]:
+        return True
+    try:
+        if (p / _DISTRO_MARKER).is_file():
+            return True
+        # Isolated colcon layout (<ws>/install/<pkg>): every package is its own
+        # prefix, so look for the sibling that installed ros_environment.
+        if p.parent.name == "install":
+            return (p.parent / "ros_environment" / _DISTRO_MARKER).is_file()
+    except OSError:
+        return False
+    return False
 
 
 def workspace_root_from_prefix(prefix: Path) -> Path | None:
@@ -284,7 +314,10 @@ def build_index(
             continue
         if is_system_prefix(prefix):
             kind = SourceKind.SYSTEM
-            label = f"System ({prefix})"
+            # Grouped by workspace root, like Workspace below: an isolated source
+            # build of the distro has one prefix per package, and labelling each
+            # one separately would split the distro into hundreds of groups.
+            label = f"System ({workspace_root_from_prefix(prefix) or prefix})"
         else:
             root = workspace_root_from_prefix(prefix) or prefix
             if workspace_root is None:

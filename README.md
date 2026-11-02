@@ -109,7 +109,7 @@ On a sourced machine most packages belong to the distro. Every command that walk
 the graph takes the same filters:
 
 ```bash
-rostree tree my_robot_bringup -w                 # ignore anything under /opt/ros
+rostree tree my_robot_bringup -w                 # ignore the ROS distro itself
 rostree tree my_robot_bringup --include 'nav2_*'
 rostree tree my_robot_bringup --exclude '*_msgs' --exclude 'rosidl_*'
 rostree tree my_robot_bringup --dep-type build   # runtime · build · test · all

@@ -83,7 +83,7 @@ Reverse lookup: what would be affected if this package changed?
 ```bash
 rostree rdeps rclcpp              # Direct dependents
 rostree rdeps rclcpp -t           # Include indirect dependents
-rostree rdeps rclcpp -w           # Skip packages installed under /opt/ros
+rostree rdeps rclcpp -w           # Skip packages that belong to the ROS distro
 rostree rdeps rclcpp --json
 ```
 
@@ -217,13 +217,15 @@ Every command that walks the dependency graph (`tree`, `graph`, `why`, `rdeps`,
 what rostree can see belongs to the distro, so these are usually what you want:
 
 ```bash
-rostree tree my_robot_bringup -w              # ignore /opt/ros packages
+rostree tree my_robot_bringup -w              # ignore the ROS distro's packages
 rostree tree my_robot_bringup --include 'nav2_*'
 rostree tree my_robot_bringup --exclude '*_msgs' --exclude 'rosidl_*'
 rostree graph --only-workspace --render png   # graph just your own packages
 ```
 
-- `-w` / `--only-workspace` drops anything installed under `/opt/ros`.
+- `-w` / `--only-workspace` drops the ROS distro's own packages — under `/opt/ros`,
+  or wherever a source build or RoboStack env put them (see
+  [Package discovery](package-discovery.md#which-prefix-is-the-distro)).
 - `--include GLOB` keeps only matching package names; repeat for several globs.
 - `--exclude GLOB` drops matching names. Excludes win over includes.
 - Patterns are shell globs matched against the package name, and are
