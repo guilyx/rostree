@@ -44,7 +44,9 @@ def env(tmp_path: Path) -> dict[str, str]:
 
 
 def run(env: dict[str, str], script: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    # The argv is this interpreter and a script from the repository's own examples/,
+    # passed as a list with no shell, so nothing in it comes from outside the test.
+    return subprocess.run(  # nosemgrep
         [sys.executable, str(EXAMPLES / script), *args],
         env=env,
         capture_output=True,
