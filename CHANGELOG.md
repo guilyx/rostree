@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/changelog.md` embeds this file rather than restating it, so the changelog
   is still written in exactly one place.
 
+- **rostree is now a library you can build on, not just a CLI.** `why`,
+  transitive `rdeps` and `diff` lived inside the CLI, interleaved with printing,
+  so another tool could only get at them by shelling out and parsing terminal
+  output. They are now plain functions in `rostree.core.analysis`, the CLI calls
+  them like anyone else, and `rostree.api` exposes them:
+  - `dependency_paths(package, dependency)` — `rostree why`
+  - `reverse_dependencies(package, transitive=True)` — `rostree rdeps -t`
+  - `dependency_versions(graph)` and `diff_dependencies(before, after)` — the
+    pieces of `rostree diff`, returning a `DependencyDiff` that is truthy when
+    anything moved
+  - `to_dot`, `to_mermaid`, `to_html` and `GraphView`, to render a graph yourself
+- **Every API function that walks the graph takes the CLI's scope arguments**:
+  `dep_type` (`runtime`, `build`, `test`, `all`), `package_filter` (a
+  `PackageFilter`), `report` (a `FilterReport`) and `index`. All additive and
+  keyword-only; `runtime_only=True` keeps working. An unknown `dep_type` raises
+  `ValueError` rather than quietly following everything.
+- `rostree tree --json` includes `hidden_children` on nodes cut off by a depth
+  limit or node budget — the "… N more" the text output already showed. Other
+  nodes keep their exact shape.
+- `rostree diff --save` records the scope it was taken with (`--dep-type`,
+  `--depth`, filters), and `--against` warns when the comparison runs under a
+  different one, since the difference in scope would otherwise read as drift.
+  Snapshots written by 1.0 are still accepted.
+
 ### Changed
 - The demo reel was re-shot as a live session rather than a reconstruction.
   A `bash` session runs in a pty, commands are typed into it a character at a
@@ -33,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   footage is composed twice: `rostree-demo.mp4` at 1920×1080 and
   `rostree-demo-square.mp4` at 1080×1080, for feeds that give a square post more
   room.
+
+- `build_tree(include_buildtool=True)` raises a `DeprecationWarning`. The
+  parameter has never had an effect — `buildtool_depend` entries are not
+  traversed — but its docstring said otherwise. It goes in 2.0.
+- `rostree rdeps --transitive` no longer lists the package itself when a cycle
+  leads back to it.
+- The package.xml parse cache keeps one entry per manifest instead of one per
+  version of it, so a long TUI session that rescans after edits no longer grows
+  without bound.
 
 ### Fixed
 

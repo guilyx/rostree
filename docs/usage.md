@@ -326,69 +326,122 @@ descendants, depth below this node, which source it came from, and its
 
 ## Python API
 
+Everything the CLI can tell you, a script can ask for directly — the CLI is built
+on these same functions. Everything exported from `rostree.api` follows semantic
+versioning; anything under `rostree.core` is internal and may move.
+
 ```python
-from rostree import (
-    list_known_packages,
-    list_known_packages_by_source,
-    get_package_info,
-    build_tree,
-    scan_workspaces,
+from rostree.api import (
+    build_graph, build_tree, dependency_paths, dependency_versions,
+    diff_dependencies, get_index, reverse_dependencies, tree_stats,
+    FilterReport, PackageFilter,
 )
-from rostree.api import build_graph, get_index, reverse_dependencies, tree_stats
-
-# List all packages
-packages = list_known_packages()  # dict[str, Path]
-
-# Group by source
-by_source = list_known_packages_by_source()  # dict[str, list[str]]
-
-# Package metadata
-info = get_package_info("rclpy")
-print(info.name, info.version, info.dependencies)
-
-# Build dependency tree
-root = build_tree("rclpy", max_depth=5, runtime_only=True)
-print(root.name, len(root.children))
-data = root.to_dict()  # JSON-friendly
-
-# Scan for workspaces
-workspaces = scan_workspaces()  # list[WorkspaceInfo]
-for ws in workspaces:
-    print(ws.path, ws.packages)
 ```
+
+### Ask the questions the CLI answers
 
 ```python
-# Statistics about a built tree
-stats = tree_stats(root)
-# {'nodes': 770, 'packages': 164, 'missing': 5, 'repeats': 543, 'cycles': 0, 'depth': 6}
+# rostree why: every shortest path from one package to another
+dependency_paths("my_robot_bringup", "rcutils")
+# [['my_robot_bringup', 'my_robot_control', 'rclcpp', 'statistics_msgs', 'rcutils'], ...]
 
-# The resolved DAG, without materialising a tree
-graph = build_graph("nav2_bringup", runtime_only=True)
-print(len(graph.packages), len(graph.edge_pairs()), graph.cycles())
+# rostree rdeps --transitive: what breaks if this changes?
+reverse_dependencies("my_robot_msgs", transitive=True)
 
-# Who depends on this package?
-print(reverse_dependencies("rclcpp"))
-
-# The package index itself
-index = get_index()
-print(index.resolve("rclcpp"), len(index), index.by_label().keys())
+# rostree diff: snapshot a package's dependency set, compare after a rebuild
+before = dependency_versions(build_graph("my_robot_nav"), exclude=["my_robot_nav"])
+# ... rebuild ...
+after = dependency_versions(build_graph("my_robot_nav"), exclude=["my_robot_nav"])
+diff = diff_dependencies(before, after)
+if diff:                                   # truthy when anything moved
+    print(diff.added, diff.removed, diff.changed)
 ```
 
-### Options
+### Build the graph yourself
 
-- **build_tree(name, max_depth=None, runtime_only=False, collapse_repeats=True, extra_source_roots=None)**
-  - `max_depth`: Limit recursion depth
-  - `runtime_only=True`: Only depend + exec_depend (faster, smaller)
-  - `collapse_repeats=False`: Expand every occurrence of a package instead of
-    referencing the first one. Exponential on real graphs — bound it with
-    `max_depth`.
-  - `extra_source_roots`: Additional paths to scan for packages
+```python
+# The resolved DAG — linear in the number of packages, whatever the shape
+graph = build_graph("nav2_bringup", dep_type="runtime")
+graph.edges        # {"nav2_bringup": ["nav2_common", ...], ...}
+graph.packages     # name -> PackageInfo, for every package that resolved
+graph.missing      # names that resolve to no package.xml
+graph.truncated    # names past max_depth: exist, but were not walked
+graph.cycles()     # [["a", "b", "a"], ...]
 
-- **build_graph(root_packages, max_depth=None, runtime_only=False)**
-  - Accepts one name or a list; returns a `DependencyGraph` with `edges`,
-    `packages`, `missing`, `depths` and `cycles()`
+# A renderable tree: each package expanded once, repeats marked
+root = build_tree("rclpy", max_depth=5)
+tree_stats(root)   # {'nodes': 770, 'packages': 164, 'repeats': 543, ...}
+root.to_dict()     # the same JSON `rostree tree --json` prints
+```
 
-- **scan_workspaces(roots=None, max_depth=4, include_home=True, include_opt_ros=True)**
-  - `roots`: Directories to scan (default: common locations)
-  - `include_home`: Scan ~/ros*_ws, ~/dev, etc.
-  - `include_opt_ros`: Include /opt/ros/* system installs
+### Scope: the same knobs as the command line
+
+Every function that walks the graph takes the same scope arguments:
+
+```python
+report = FilterReport()
+graph = build_graph(
+    "my_robot_bringup",
+    dep_type="build",                                   # runtime | build | test | all
+    package_filter=PackageFilter(
+        include=("my_robot_*",), exclude=("*_msgs",), only_workspace=True
+    ),
+    report=report,                                      # what the filter removed
+)
+print(report.summary())  # "3 package(s) hidden by filters: ..."
+```
+
+A filtered-out package is neither returned nor followed. `reverse_dependencies`
+is the one exception, as on the command line: it filters the answer, not the
+walk, so excluding a package never hides the dependents behind it. An unknown
+`dep_type` raises `ValueError` rather than quietly following everything.
+`runtime_only=True` is the older spelling of `dep_type="runtime"` and still works.
+
+Pass `index=get_index()` (or one you built) to reuse a single package scan across
+many calls; otherwise a process-wide cached index is used.
+
+### Render it
+
+```python
+from rostree.api import GraphView, to_dot, to_html, to_mermaid
+
+from pathlib import Path
+
+graph = build_graph("my_robot_bringup")
+view = GraphView.from_graph(graph)
+Path("deps.dot").write_text(to_dot(view), encoding="utf-8")
+Path("deps.mmd").write_text(to_mermaid(view), encoding="utf-8")
+# The interactive viewer. Pass the index so packages are coloured by source.
+Path("deps.html").write_text(to_html(graph, index=get_index()), encoding="utf-8")
+```
+
+Write with an explicit `encoding="utf-8"`: the viewer contains characters such
+as `→` that the default codec on Windows cannot encode.
+
+### Discovery
+
+```python
+from rostree.api import (
+    get_package_info, list_known_packages, list_known_packages_by_source, scan_workspaces,
+)
+
+list_known_packages()             # {name: Path to package.xml}
+list_known_packages_by_source()   # {"System (/opt/ros/jazzy)": [...], "Source (...)": [...]}
+get_package_info("rclpy")         # PackageInfo: name, version, dependencies, ...
+scan_workspaces()                 # [WorkspaceInfo(path, has_src, has_install, packages)]
+
+index = get_index()
+index.resolve("rclcpp")           # Path to its package.xml, or None
+index.get("rclcpp").kind          # SourceKind.SYSTEM
+index.workspace_names()           # every package that is not the distro's
+```
+
+`scan_workspaces(roots=None, max_depth=4, include_home=True, include_opt_ros=True)`
+looks in common locations (`~/*_ws`, `~/dev`, `/opt/ros/*`) unless given `roots`,
+and only reports a directory that contains a package or colcon's markers.
+
+### Deprecated
+
+- `build_tree(include_buildtool=...)` has never had an effect —
+  `buildtool_depend` entries are build tooling and are not traversed. Passing
+  `True` now raises a `DeprecationWarning`; the parameter goes in 2.0.

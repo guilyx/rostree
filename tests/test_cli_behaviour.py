@@ -164,3 +164,39 @@ class TestWorkspaceWideGraph:
         write_package(tmp_path, "only_via_s")
         assert run(tmp_path, "graph") == 0
         assert "only_via_s" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("fresh_consoles")
+class TestSnapshotsRecordTheirScope:
+    """A runtime-only snapshot compared against a full walk reports the scope as drift."""
+
+    def test_snapshot_records_scope(self, ws: Path, tmp_path_factory) -> None:
+        snap = tmp_path_factory.mktemp("s") / "snap.json"
+        run(ws, "diff", "app", "--save", str(snap), "--dep-type", "runtime", "-d", "2")
+        scope = json.loads(snap.read_text())["scope"]
+        assert scope["dep_type"] == "runtime"
+        assert scope["depth"] == 2
+
+    def test_mismatched_scope_is_warned_about(self, ws: Path, tmp_path_factory, capsys) -> None:
+        snap = tmp_path_factory.mktemp("s") / "snap.json"
+        run(ws, "diff", "app", "--save", str(snap), "--dep-type", "runtime")
+        capsys.readouterr()
+        run(ws, "diff", "app", "--against", str(snap))
+        err = capsys.readouterr().err
+        assert "different scope" in err
+        assert "dep_type: 'runtime' then, 'all' now" in err
+
+    def test_matching_scope_is_quiet(self, ws: Path, tmp_path_factory, capsys) -> None:
+        snap = tmp_path_factory.mktemp("s") / "snap.json"
+        run(ws, "diff", "app", "--save", str(snap))
+        capsys.readouterr()
+        assert run(ws, "diff", "app", "--against", str(snap)) == 0
+        assert "different scope" not in capsys.readouterr().err
+
+    def test_snapshot_from_before_scopes_existed_is_accepted(
+        self, ws: Path, tmp_path_factory, capsys
+    ) -> None:
+        snap = tmp_path_factory.mktemp("s") / "old.json"
+        snap.write_text(json.dumps({"package": "app", "dependencies": {"core": "1.0.0"}}))
+        run(ws, "diff", "app", "--against", str(snap))
+        assert "different scope" not in capsys.readouterr().err
