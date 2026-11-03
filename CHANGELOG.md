@@ -1,20 +1,17 @@
 # Changelog
 
-All notable changes to this project are documented in this file, and rostree
+All notable changes to this project are documented in this file. The format is
+based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and rostree
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-From 1.1.0 on, each release's entry is written by
-[release-please](https://github.com/googleapis/release-please) from the
+A release is cut each time a pull request that calls for one is merged. The
 [Conventional Commits](https://www.conventionalcommits.org/) titles of the pull
-requests it contains, and the version bump follows from them — see
+requests merged since the last release decide the version, and whatever is under
+`[Unreleased]` becomes its entry, followed by those pull requests — or, when
+nothing was written there, an entry generated from their titles. See
 [Releases](https://github.com/guilyx/rostree/blob/main/CONTRIBUTING.md#releases).
-Entries up to 1.0.0, and the longer notes on 1.1.0 below, were written by hand in
-the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## 1.1.0 in detail
-
-release-please writes the summary of 1.1.0 above this section when it cuts the
-release. What follows is the same release explained for someone using rostree.
+## [Unreleased]
 
 ### Added
 - The `docs/` folder is now published as a documentation site at
@@ -75,12 +72,12 @@ release. What follows is the same release explained for someone using rostree.
   Snapshots written by 1.0 are still accepted.
 
 ### Changed
-- **Releases are automated.** Every pull request is squash-merged as one
-  Conventional Commit, and release-please keeps a release pull request open that
-  bumps the version accordingly — `fix:` a patch, `feat:` a minor version, `!` a
-  major one — and writes this changelog. Merging it tags the release, creates the
-  GitHub release and publishes to PyPI. A check rejects pull request titles that
-  are not Conventional Commits, since the title is what decides the bump.
+- **Releases happen on merge.** Merging a pull request whose title calls for a
+  release — `fix:` a patch, `feat:` a minor version, `!` a major one — bumps the
+  version, turns these notes into the release's entry, tags it, publishes to PyPI
+  and creates the GitHub release, with nobody to approve anything. `docs:`,
+  `chore:`, `ci:` and the like wait for the next one. A check rejects pull request
+  titles that are not Conventional Commits, since the title decides the bump.
 - Pre-commit runs ruff, black and bandit from the `dev` extra — the versions CI
   pins — instead of its own copies, which had drifted (ruff 0.8 locally, 0.16 in
   CI). It now checks `examples/` too, and accepts the `ci:`, `perf:`, `build:`

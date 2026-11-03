@@ -179,7 +179,7 @@ When picking up a roadmap item:
 1. Create an issue referencing this roadmap
 2. Create a feature branch
 3. Add tests for new functionality
-4. Update the documentation (the changelog is written by the release pull request)
+4. Update the documentation, and add notes under `[Unreleased]` in `CHANGELOG.md` if the change needs more than its title
 5. Submit a PR referencing the issue
 
 ---

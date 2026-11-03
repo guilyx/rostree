@@ -21,16 +21,16 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ruff
-        run: ruff check src tests examples
+        run: ruff check src tests examples scripts
 
       - name: Black
-        run: black --check src tests examples
+        run: black --check src tests examples scripts
 
       # Codacy runs Bandit on every pull request, but only in its own UI. Running
       # it here means a finding shows up in the same place as a lint failure, and
-      # `bandit -c pyproject.toml -r src tests examples` reproduces it locally.
+      # `bandit -c pyproject.toml -r src tests examples scripts` reproduces it locally.
       - name: Bandit
-        run: bandit -c pyproject.toml -r src tests examples
+        run: bandit -c pyproject.toml -r src tests examples scripts
 
   test:
     runs-on: ubuntu-latest

@@ -25,14 +25,14 @@ repos:
         entry: ruff check --fix
         language: system
         types: [python]
-        files: ^(src|tests|examples)/
+        files: ^(src|tests|examples|scripts)/
 
       - id: black
         name: black
         entry: black
         language: system
         types: [python]
-        files: ^(src|tests|examples)/
+        files: ^(src|tests|examples|scripts)/
 
       # The same security scan Codacy runs on pull requests. tests/ is excluded
       # from this tool (see .codacy.yaml for why); pre-commit passes files
@@ -42,4 +42,4 @@ repos:
         entry: bandit -c pyproject.toml
         language: system
         types: [python]
-        files: ^(src|examples)/
+        files: ^(src|examples|scripts)/
