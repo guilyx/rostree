@@ -95,7 +95,7 @@ problems, so it can gate CI.
 ```bash
 rostree check                     # Every workspace package
 rostree check nav2_bringup        # Specific roots
-rostree check --ignore-system     # Ignore names that look like rosdep keys
+rostree check --ignore-system     # Don't fail on names that look like rosdep keys
 rostree check --junit report.xml  # Also write a JUnit report for CI
 rostree check --json
 ```
@@ -105,6 +105,13 @@ In CI:
 ```yaml
 - run: rostree check --only-workspace --junit rostree.xml
 ```
+
+`--ignore-system` is a guess from the name: an unresolved name with no underscore
+(`eigen`, `boost`) is usually a rosdep key rather than a ROS package. But
+`rclcpp`, `tf2`, `urdf` and `xacro` have no underscore either, so an unbuilt one
+would be waved through too. Whatever the flag holds back is therefore always
+listed — on stderr, and under `"ignored"` in `--json` — so a CI log shows what
+was not checked.
 
 ### `rostree graph`
 
@@ -233,7 +240,13 @@ rostree graph --only-workspace --render png   # graph just your own packages
 
 A filtered-out package is **neither shown nor followed**, so anything reachable
 only through it disappears too — that is what makes `--only-workspace` useful.
-Because that hides real edges, commands print a line saying what was held back.
+Because that hides real edges, every one of these commands says what was held
+back: a line on stderr, and a `"filtered"` list in `--json` output.
+
+`rdeps` is the one exception to "not followed", on purpose. It answers *what
+breaks if this changes*, so it walks the full reverse graph and filters the
+answer afterwards: excluding an intermediate package must not hide the dependents
+behind it.
 
 ### Which dependencies to follow
 

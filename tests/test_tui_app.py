@@ -384,3 +384,76 @@ class TestReviewRegressions:
                     assert app._root_package == "robot_app"
 
         asyncio.run(scenario())
+
+
+class TestRequestsDuringABuild:
+    """Found in review: a request made mid-build was dropped, refresh did not rescan."""
+
+    def test_scope_toggled_mid_build_is_built_not_dropped(self, tmp_path: Path) -> None:
+        """The header said "all dependencies" while the tree still showed runtime only."""
+        import threading
+
+        from rostree.tui import app as tui_app
+
+        prefix = build_install_space(tmp_path)
+        calls: list[bool] = []
+        release = threading.Event()
+        real_build = tui_app.build_tree
+
+        def slow_build(*args, **kwargs):
+            calls.append(kwargs["runtime_only"])
+            if len(calls) == 1:
+                release.wait(5)  # hold the first build open while scope is toggled
+            return real_build(*args, **kwargs)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                with mock.patch.object(tui_app, "build_tree", slow_build):
+                    app = DepTreeApp(root_package="robot_app")
+                    async with app.run_test(size=(120, 40)) as pilot:
+                        await pilot.press("enter")
+                        await _settle(app, pilot, lambda: bool(calls))
+                        assert app._building is True and app._runtime_only is True
+                        await pilot.press("t")  # toggle while the first build runs
+                        await pilot.pause()
+                        assert app._pending_tree == "robot_app"
+                        release.set()
+                        await _settle(
+                            app, pilot, lambda: len(calls) == 2 and app._root_node is not None
+                        )
+                        # The tree on screen is the one for the scope the header names.
+                        assert calls == [True, False]
+                        assert app._runtime_only is False
+                        assert app._pending_tree is None
+
+        asyncio.run(scenario())
+
+    def test_refresh_with_a_tree_open_sees_new_packages(self, tmp_path: Path) -> None:
+        """`r` rebuilt the tree from the cached index, so new packages stayed "not found"."""
+        from rostree.core.tree import NodeStatus
+
+        prefix = build_install_space(tmp_path)
+
+        async def scenario() -> None:
+            with mock.patch.dict(os.environ, _env(ament=prefix), clear=False):
+                app = DepTreeApp(root_package="robot_app")
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await _start(app, pilot)
+                    await _settle(app, pilot, lambda: app._root_node is not None)
+
+                    # A new package lands on disk and robot_app starts depending on it.
+                    share = prefix / "share"
+                    write_package(share, "new_driver")
+                    write_package(share, "robot_app", depends=["middleware", "new_driver"])
+
+                    old_root = app._root_node
+                    await pilot.press("r")
+                    await _settle(
+                        app,
+                        pilot,
+                        lambda: app._root_node is not old_root and not app._building,
+                    )
+                    new_driver = next(c for c in app._root_node.children if c.name == "new_driver")
+                    assert new_driver.status is not NodeStatus.MISSING
+
+        asyncio.run(scenario())

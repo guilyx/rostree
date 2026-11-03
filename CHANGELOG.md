@@ -74,6 +74,33 @@ on 1.0.0.
   of JavaScript has ever shown up in a diff. They are now `\u0000` escapes, which
   are identical at runtime, and a test keeps them out.
 
+- **`rostree --no-color <command>` works.** The flag was accepted before the
+  subcommand and then silently reset by it — argparse copies a subparser's
+  defaults over the values the main parser already set — so only
+  `rostree <command> --no-color` ever turned colour off.
+- **Every filtering command says what it filtered.** `tree` and `why` printed a
+  "hidden by filters" line; `graph`, `check`, `rdeps` and `diff` filtered
+  silently, which is exactly what the 0.4.0 notes said would never happen. They
+  all report it now, on stderr and as a `"filtered"` list in `--json`.
+- **`check --ignore-system` lists what it held back.** It decides a name is a
+  rosdep key by the absence of an underscore, which also waves through an unbuilt
+  `rclcpp`, `tf2` or `urdf`. A CI gate cannot guess silently, so the held-back
+  names are printed and reported under `"ignored"` in `--json`.
+- **`why` names the scope it searched.** A miss under `--dep-type build` or
+  `test` was reported as "(runtime dependencies only)"; it now names the actual
+  dependency type, and the depth limit when one was set.
+- **A workspace-wide `graph` uses the right roots.** It ignored `--include` and
+  `--exclude` when choosing which packages to start from, dropped any workspace
+  whose path contained the word "System", and built a second package index that
+  knew nothing of `-s` paths — so `rostree graph -s path/` without a package
+  found nothing to graph.
+- **TUI: `r` rescans with a tree open,** instead of rebuilding from the index it
+  already had, so packages added since startup no longer show as "not found";
+  and toggling scope while a tree is still building now rebuilds it, instead of
+  leaving the header describing one scope over a tree of the other.
+- Graph and snapshot files, and DOT piped to Graphviz, are read and written as
+  UTF-8 explicitly rather than in the locale's encoding.
+
 ## [1.0.0] - 2026-08-10
 
 The interface has been through three releases of hard changes — trees stopped

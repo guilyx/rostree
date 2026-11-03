@@ -16,7 +16,8 @@ from textual.widgets import Footer, Header, Input, LoadingIndicator, Static, Tre
 from textual.widgets.tree import TreeNode
 
 from rostree.api import build_tree, get_index
-from rostree.core.index import PackageEntry, PackageIndex, SourceKind
+from rostree.core.index import PackageEntry, PackageIndex, SourceKind, clear_index_cache
+from rostree.core.parser import RUNTIME_DEPENDENCY_TAGS
 from rostree.core.tree import NodeStatus, tree_stats
 
 # A widget lookup can legitimately miss. The TUI updates widgets from worker
@@ -404,6 +405,10 @@ class DepTreeApp(App[None]):
         self._packages_loading: bool = False
         self._packages_error: str | None = None
         self._building: bool = False
+        #: A tree requested while another was building. Kept rather than dropped,
+        #: so toggling scope mid-build cannot leave the header describing one
+        #: scope and the tree showing the other.
+        self._pending_tree: str | None = None
 
     DEFAULT_CSS = """
     /* Welcome screen styles */
@@ -696,8 +701,9 @@ class DepTreeApp(App[None]):
     def _load_tree(self, root_package: str) -> None:
         """Kick off a background build of the dependency tree for a package."""
         if self._building:
-            # A build is already in flight; dropping the request must not leave
-            # _root_package pointing at a tree that was never rendered.
+            # A build is already in flight. Queue this one for when it lands;
+            # _root_package must not point at a tree that was never rendered.
+            self._pending_tree = root_package
             return
         self._root_package = root_package
         self._search_matches = []
@@ -708,19 +714,20 @@ class DepTreeApp(App[None]):
         self._clear_tree(tree)
         tree.root.label = f"[{COLOR_HEADER}]{root_package}[/] [dim]building…[/]"
         self._set_status(f"[dim]Resolving dependencies of {root_package}…[/]")
+        runtime_only = self._runtime_only  # read on the UI thread, not the worker's
         self.run_worker(
-            lambda: self._build_tree_worker(root_package),
+            lambda: self._build_tree_worker(root_package, runtime_only),
             thread=True,
             exclusive=False,
         )
 
-    def _build_tree_worker(self, root_package: str) -> None:
+    def _build_tree_worker(self, root_package: str, runtime_only: bool) -> None:
         """Resolve a dependency tree off the UI thread."""
         try:
             node = build_tree(
                 root_package,
                 max_depth=TUI_TREE_MAX_DEPTH,
-                runtime_only=self._runtime_only,
+                runtime_only=runtime_only,
                 extra_source_roots=self._extra_source_roots or None,
             )
         except Exception as exc:
@@ -728,13 +735,25 @@ class DepTreeApp(App[None]):
             return
         self.call_from_thread(self._on_tree_built, root_package, node)
 
+    def _take_pending_tree(self) -> bool:
+        """Start a build that was requested while the last one ran. True if one did."""
+        pending, self._pending_tree = self._pending_tree, None
+        if pending is None:
+            return False
+        self._load_tree(pending)
+        return True
+
     def _on_tree_failed(self, root_package: str, message: str) -> None:
         self._building = False
+        if self._take_pending_tree():
+            return
         self._set_details(f"[red]Error building tree for {root_package}: {message}[/]")
         self._set_status("[red]Build failed[/]")
 
     def _on_tree_built(self, root_package: str, node: Any) -> None:
         self._building = False
+        if self._take_pending_tree():
+            return  # superseded: a newer request arrived while this one built
         if node is None:
             self._set_details(f"Package not found: {root_package}")
             self._set_status(f"[yellow]{root_package} not found[/]")
@@ -884,15 +903,19 @@ class DepTreeApp(App[None]):
         self._load_main_view()
 
     def action_refresh(self) -> None:
+        """Look at the disk again, in whatever view is open."""
         if not self._main_started:
             return
-        if self._root_package:
-            self._load_tree(self._root_package)
-            return
+        # With a tree open this used to rebuild the tree from the cached index,
+        # so a package added since startup still showed as "not found".
+        clear_index_cache()
         self._packages_cache = None
         self._packages_loading = False
         self._index = None
         self._start_package_scan()
+        if self._root_package:
+            self._load_tree(self._root_package)
+            return
         self._load_main_view()
 
     def action_expand_all(self) -> None:
@@ -947,7 +970,7 @@ class DepTreeApp(App[None]):
         index = self._index
         if index is None:
             return
-        tags = ("depend", "exec_depend") if self._runtime_only else None
+        tags = RUNTIME_DEPENDENCY_TAGS if self._runtime_only else None
         try:
             reverse = index.reverse_dependencies(include_tags=tags)
         except Exception as exc:  # pragma: no cover - defensive
