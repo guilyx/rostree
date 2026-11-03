@@ -11,6 +11,19 @@ requests it contains, and the version bump follows from them — see
 Entries up to 1.0.0, and the longer notes on 1.1.0 below, were written by hand in
 the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [1.1.0](https://github.com/guilyx/rostree/compare/v1.0.0...v1.1.0) (2026-11-03)
+
+
+### Features
+
+* **api:** make rostree a library others can build on ([#22](https://github.com/guilyx/rostree/issues/22)) ([272dc5f](https://github.com/guilyx/rostree/commit/272dc5fbde842119f584627ff24fba81b78b58fc))
+
+
+### Bug Fixes
+
+* **cli:** global --no-color, report every filter, honest --ignore-system ([#21](https://github.com/guilyx/rostree/issues/21)) ([8312257](https://github.com/guilyx/rostree/commit/831225758b72fafe67a633d64f953e5d85a50465))
+* **core:** honour REP 149 conditions, find the distro anywhere, stop mislabelling depth-limited packages ([#20](https://github.com/guilyx/rostree/issues/20)) ([f01a65a](https://github.com/guilyx/rostree/commit/f01a65a24621885584c2c463a08d7e27377d3c8f))
+
 ## 1.1.0 in detail
 
 release-please writes the summary of 1.1.0 above this section when it cuts the
