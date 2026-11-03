@@ -57,6 +57,28 @@ def write_package(
     return manifest
 
 
+def make_ros_workspace(
+    ws: Path,
+    *,
+    packages: tuple[str, ...] = ("demo_pkg",),
+    built: bool = False,
+) -> Path:
+    """
+    Lay out a workspace the way a real one looks: ``ws/src/<pkg>/package.xml``.
+
+    ``scan`` needs evidence of ROS before it calls a directory a workspace, so an
+    empty ``src/`` is not a fixture for one. ``built=True`` adds the
+    ``COLCON_IGNORE`` markers colcon drops into the build/ and install/ it makes.
+    """
+    for name in packages:
+        write_package(ws / "src", name)
+    if built:
+        for sub in ("build", "install"):
+            (ws / sub).mkdir(parents=True, exist_ok=True)
+            (ws / sub / "COLCON_IGNORE").write_text("")
+    return ws
+
+
 @pytest.fixture
 def make_package(tmp_path: Path):
     """Factory writing packages into a temporary source root."""

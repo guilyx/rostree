@@ -242,3 +242,65 @@ class TestReverseDependencyCaching:
         assert full["build_dep"] == {"app"}
         # ...and asking again in the original order still gives the original answer.
         assert index.reverse_dependencies(include_tags=("depend", "exec_depend")) == runtime
+
+
+class TestDistroDetection:
+    """Which install prefix is the ROS distro, as opposed to the user's workspace."""
+
+    def test_opt_ros_is_the_distro(self) -> None:
+        from rostree.core.index import is_system_prefix
+
+        assert is_system_prefix(Path("/opt/ros/jazzy"))
+
+    def test_opt_ros_is_matched_as_path_components_not_a_substring(self) -> None:
+        """'/opt/ros' as a substring used to claim the user's own overlays."""
+        from rostree.core.index import is_system_prefix
+
+        assert not is_system_prefix(Path("/home/me/opt/ros2_overlay"))
+        assert not is_system_prefix(Path("/srv/opt/rosbridge_ws/install"))
+
+    def test_a_distro_outside_opt_ros_is_recognised_by_ros_environment(
+        self, tmp_path: Path
+    ) -> None:
+        """Source builds, RoboStack/conda envs and Windows installs live anywhere."""
+        from rostree.core.index import is_system_prefix
+
+        distro = make_prefix(tmp_path, "conda_env", ros_environment=[], rclcpp=[])
+        overlay = make_prefix(tmp_path, "my_ws_install", my_pkg=["rclcpp"])
+        assert is_system_prefix(distro)
+        assert not is_system_prefix(overlay)
+
+    def test_isolated_source_build_of_the_distro(self, tmp_path: Path) -> None:
+        """colcon --isolated: one prefix per package, ros_environment is a sibling."""
+        from rostree.core.index import is_system_prefix
+
+        install = tmp_path / "ros2_jazzy" / "install"
+        make_prefix(install, "ros_environment", ros_environment=[])
+        rclcpp = make_prefix(install, "rclcpp", rclcpp=[])
+        assert is_system_prefix(rclcpp)
+
+    def test_relocated_distro_is_classified_system_by_the_index(self, tmp_path: Path) -> None:
+        distro = make_prefix(tmp_path, "conda_env", ros_environment=[], rclcpp=[])
+        overlay = make_prefix(tmp_path, "ws_install", my_pkg=["rclcpp"])
+        env = {**EMPTY_ENV, "AMENT_PREFIX_PATH": os.pathsep.join([str(overlay), str(distro)])}
+        with mock.patch.dict(os.environ, env, clear=False):
+            index = build_index()
+        assert index.get("rclcpp").kind is SourceKind.SYSTEM
+        assert index.get("my_pkg").kind is SourceKind.WORKSPACE
+        # --only-workspace filters on SYSTEM, so this is what makes it work at all
+        # for a distro that does not live under /opt/ros.
+        assert index.workspace_names() == ["my_pkg"]
+
+    def test_isolated_distro_is_one_source_group_not_one_per_package(self, tmp_path: Path) -> None:
+        install = tmp_path / "ros2_jazzy" / "install"
+        prefixes = [
+            make_prefix(install, "ros_environment", ros_environment=[]),
+            make_prefix(install, "rcutils", rcutils=[]),
+            make_prefix(install, "rclcpp", rclcpp=["rcutils"]),
+        ]
+        env = {**EMPTY_ENV, "AMENT_PREFIX_PATH": os.pathsep.join(map(str, prefixes))}
+        with mock.patch.dict(os.environ, env, clear=False):
+            labels = build_index().by_label()
+        system = [label for label in labels if label.startswith("System")]
+        assert len(system) == 1
+        assert labels[system[0]] == ["rclcpp", "rcutils", "ros_environment"]

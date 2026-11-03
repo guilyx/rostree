@@ -292,9 +292,9 @@ class TestScanWorkspaces:
     """Tests for scan_workspaces API."""
 
     def test_finds_workspace(self, tmp_path: Path) -> None:
-        ws = tmp_path / "test_ws"
-        ws.mkdir()
-        (ws / "src").mkdir()
+        from tests.conftest import make_ros_workspace
+
+        ws = make_ros_workspace(tmp_path / "test_ws")
 
         result = scan_workspaces(roots=[ws], include_home=False, include_opt_ros=False)
         assert len(result) == 1

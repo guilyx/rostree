@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rostree.core.index import (
+    _PRUNE_DIRS,
     PackageIndex,
     SourceKind,
     build_index,
@@ -98,7 +99,7 @@ def scan_for_workspaces(
             for pattern in ("ros*_ws", "ros2_ws", "catkin_ws", "colcon_ws", "*_ws"):
                 roots.extend(home.glob(pattern))
             # Also check common dev directories
-            for subdir in ("dev", "src", "projects", "workspace", "workspaces", "sas"):
+            for subdir in ("dev", "src", "projects", "workspace", "workspaces"):
                 candidate = home / subdir
                 if candidate.exists() and candidate.is_dir():
                     roots.append(candidate)
@@ -113,32 +114,42 @@ def scan_for_workspaces(
     seen: set[Path] = set()
 
     def _is_workspace(p: Path) -> WorkspaceInfo | None:
-        """Check if path is a ROS 2 workspace root."""
+        """
+        Check if path is a ROS 2 workspace root.
+
+        Having a ``src/`` directory proves nothing — every JavaScript project and
+        half of ``~/dev`` has one. A workspace has to show evidence of ROS: a
+        package in its source tree, or an install space colcon or ament made.
+        """
         resolved = p.resolve()
         if resolved in seen:
             return None
-        has_src = (p / "src").exists() and (p / "src").is_dir()
-        has_install = (p / "install").exists() and (p / "install").is_dir()
-        has_build = (p / "build").exists() and (p / "build").is_dir()
-        # For /opt/ros distros, check share dir
-        has_share = (p / "share").exists() and (p / "share").is_dir()
-        if has_src or has_install or has_share:
-            seen.add(resolved)
-            info = WorkspaceInfo(
-                path=resolved,
-                has_src=has_src,
-                has_install=has_install or has_share,
-                has_build=has_build,
-            )
-            # Discover packages
-            if has_src:
-                info.packages = _list_packages_in_src(p / "src")
-            elif has_install:
-                info.packages = _list_packages_in_install(p / "install")
-            elif has_share:
-                info.packages = _list_packages_in_install(p)
-            return info
-        return None
+        has_src = (p / "src").is_dir()
+        has_install = (p / "install").is_dir()
+        has_build = (p / "build").is_dir()
+        # For /opt/ros distros, the prefix itself has a share/ directory.
+        has_share = (p / "share").is_dir()
+        if not (has_src or has_install or has_share):
+            return None
+
+        packages: list[str] = []
+        if has_src:
+            packages = _list_packages_in_src(p / "src")
+        if not packages and has_install:
+            packages = _list_packages_in_install(p / "install")
+        if not packages and has_share:
+            packages = _list_packages_in_install(p)
+        if not packages and not _has_install_marker(p):
+            return None
+
+        seen.add(resolved)
+        return WorkspaceInfo(
+            path=resolved,
+            has_src=has_src,
+            has_install=has_install or has_share,
+            has_build=has_build,
+            packages=packages,
+        )
 
     def _scan_dir(p: Path, depth: int) -> None:
         if depth > max_depth:
@@ -150,10 +161,14 @@ def scan_for_workspaces(
             if ws is not None:
                 workspaces.append(ws)
                 return  # Don't recurse into a workspace
-            for child in p.iterdir():
-                if child.is_dir() and not child.name.startswith("."):
+            for child in sorted(p.iterdir()):
+                if (
+                    child.is_dir()
+                    and not child.name.startswith(".")
+                    and child.name not in _PRUNE_DIRS
+                ):
                     _scan_dir(child, depth + 1)
-        except PermissionError:
+        except OSError:  # PermissionError, a vanished directory, a dead mount
             pass
 
     for root in roots:
@@ -167,6 +182,29 @@ def scan_for_workspaces(
                 _scan_dir(root_path, 0)
 
     return workspaces
+
+
+#: Files colcon and ament leave behind. ``COLCON_IGNORE`` is the precise one:
+#: colcon drops it into the build/, install/ and log/ directories it creates, and
+#: a React or Gradle project's build/ never has it. An install space with none of
+#: these and no packages is not something rostree can say anything about.
+_COLCON_MARKERS = (
+    ("install", ".colcon_install_layout"),
+    ("install", "setup.bash"),
+    ("install", "setup.sh"),
+    ("install", "local_setup.bash"),
+    ("install", "local_setup.sh"),
+    ("install", "COLCON_IGNORE"),
+    ("build", "COLCON_IGNORE"),
+    ("log", "COLCON_IGNORE"),
+    (".", "setup.bash"),  # a distro prefix such as /opt/ros/<distro>
+    (".", "local_setup.bash"),
+)
+
+
+def _has_install_marker(workspace: Path) -> bool:
+    """True if colcon or ament has laid anything down in ``workspace``."""
+    return any((workspace / sub / marker).is_file() for sub, marker in _COLCON_MARKERS)
 
 
 def _list_packages_in_src(src: Path) -> list[str]:
@@ -251,7 +289,7 @@ def list_packages_by_source(
     List packages grouped by source label.
 
     Lets you distinguish:
-    - System: /opt/ros/... (ROS distro)
+    - System: the ROS distro itself (/opt/ros/..., or a source/conda install)
     - Workspace: first non-system install (your workspace)
     - Other: other install prefixes (third-party workspaces)
     - Source: unbuilt packages from workspace src trees

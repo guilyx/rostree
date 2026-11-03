@@ -1209,7 +1209,7 @@ def _add_filter_args(parser: argparse.ArgumentParser, *, short_workspace: bool =
         "--workspace-only",
         dest="only_workspace",
         action="store_true",
-        help="Ignore packages installed under /opt/ros",
+        help="Ignore the ROS distro's own packages (under /opt/ros, or wherever it is installed)",
     )
     group.add_argument(
         "--include",

@@ -19,6 +19,43 @@ From package.xml we collect dependencies from these tags (when not using runtime
 We do **not** traverse `buildtool_depend` (e.g. ament_cmake, ament_python); they pull
 in the whole build toolchain and make trees huge without saying much about the package.
 
+Only tags that are **direct children** of `<package>` count, as
+[REP 149](https://ros.org/reps/rep-0149.html) specifies. `<export>` holds
+free-form XML for build tools and plugins, and a `<depend>` nested in there is
+not a dependency.
+
+### Conditional dependencies
+
+A format-3 manifest can attach a `condition` to any dependency. Packages that
+build on both ROS 1 and ROS 2 use it constantly:
+
+```xml
+<depend condition="$ROS_VERSION == 1">roscpp</depend>
+<depend condition="$ROS_VERSION == 2">rclcpp</depend>
+```
+
+rostree evaluates these the way catkin_pkg, colcon and ament do: `$NAME` reads
+an environment variable (an unset one is the empty string), operands compare as
+strings, `and` binds tighter than `or`, and parentheses group. String comparison
+is the upstream semantics rather than a shortcut — ROS distro names are chosen in
+alphabetical order precisely so that `$ROS_DISTRO >= humble` works.
+
+`ROS_VERSION` defaults to `2` and `ROS_PYTHON_VERSION` to `3` when nothing is
+sourced, because rostree is a ROS 2 tool. Ignoring conditions used to make
+`roscpp` look like a dependency on a ROS 2 machine, where it never resolves, so
+`rostree check` failed CI for every package that also supports ROS 1.
+
+Two deliberate choices:
+
+- **A condition rostree cannot parse keeps its dependency.** Dropping it would
+  make the tree quietly smaller than the manifest says; one dependency too many
+  is the recoverable mistake.
+- **Nothing is ever `eval`'d.** The manifest is untrusted text. catkin_pkg's own
+  evaluator formats operands into a string and evaluates it; rostree uses a small
+  recursive-descent parser over a closed set of tokens instead.
+
+Implementation: `src/rostree/core/conditions.py`.
+
 ### ROS packages vs rosdep keys
 
 A `<depend>` entry can name either a ROS package or a rosdep key for a system
