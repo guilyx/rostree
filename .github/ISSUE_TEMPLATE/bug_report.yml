@@ -1,0 +1,60 @@
+name: Bug report
+description: rostree did something wrong, crashed, or disagreed with your workspace.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The fastest bugs to fix are the ones we can
+        reproduce, and with rostree that usually comes down to how your workspace
+        is laid out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, and what it printed. Paste output as text, not a screenshot.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: rostree version
+      description: Output of `rostree --version`.
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: ROS 2 distro, and where it is installed
+      placeholder: "jazzy, from apt in /opt/ros/jazzy"
+  - type: dropdown
+    id: layout
+    attributes:
+      label: How the workspace is built
+      options:
+        - colcon, merged install (--merge-install)
+        - colcon, isolated install (the default)
+        - colcon, symlink install
+        - Source only, not built
+        - Not sure
+        - Other (please describe below)
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Your OS and Python version, and the ROS variables rostree reads:
+        `echo $AMENT_PREFIX_PATH; echo $COLCON_PREFIX_PATH; echo $ROS2_WORKSPACE; echo $COLCON_WORKSPACE`
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A minimal package.xml that triggers it is gold.

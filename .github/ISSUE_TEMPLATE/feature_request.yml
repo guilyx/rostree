@@ -1,0 +1,31 @@
+name: Feature request
+description: A question you want rostree to answer, or something it should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question you are trying to answer
+      description: |
+        Start from the problem, not the command. "Which of my packages would a
+        change to my_msgs force me to rebuild?" is more useful than "add a flag".
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you answer it today
+      description: Another tool, a script, by hand, or not at all.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. A command, an API function, a view in the TUI or the browser graph.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to work on it?
+      options:
+        - Yes, with some guidance
+        - Yes, I know how I would do it
+        - No

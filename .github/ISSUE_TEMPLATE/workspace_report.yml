@@ -1,0 +1,51 @@
+name: Workspace report
+description: Tell us how rostree did on a real workspace — right or wrong.
+labels: [workspace-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every test in rostree runs on generated workspaces. Reports from real ones
+        are how layouts we never generated get found, and they feed the
+        evaluation for the paper we intend to publish
+        (https://guilyx.github.io/rostree/publication/).
+        A report that says "it all worked" on a large workspace is useful too.
+
+        Only share what you are free to share: a public repository, or sizes
+        and timings without package names.
+  - type: input
+    id: workspace
+    attributes:
+      label: Which workspace
+      description: A public repository URL if there is one, otherwise a short description.
+      placeholder: "https://github.com/ros-navigation/navigation2, jazzy branch"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: rostree version
+    validations:
+      required: true
+  - type: textarea
+    id: layout
+    attributes:
+      label: Layout
+      description: Distro and where it is installed; how the workspace is built (merged, isolated, symlink, source only); any overlays.
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Size and timing
+      description: |
+        Optional, and very welcome. For example:
+        `rostree list --json | python3 -c "import json,sys; print(len(json.load(sys.stdin)))"`
+        and `time rostree graph <package> -f dot -o /dev/null`.
+      render: text
+  - type: textarea
+    id: verdict
+    attributes:
+      label: What it got right or wrong
+    validations:
+      required: true

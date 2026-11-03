@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://guilyx.github.io/rostree/
+    about: Usage, the algorithms, and how to build on the library.
+  - name: Report a security vulnerability
+    url: https://github.com/guilyx/rostree/security/advisories/new
+    about: Privately, please — not in a public issue. See SECURITY.md.
