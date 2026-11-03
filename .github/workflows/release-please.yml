@@ -1,0 +1,59 @@
+# Versioning and releases, from the commits on main.
+#
+# Every pull request is squash-merged, so each one lands on main as a single
+# Conventional Commit whose subject is the PR title. On every push to main,
+# release-please reads the commits since the last release and keeps one open
+# "chore: release X.Y.Z" pull request up to date:
+#
+#   fix: / perf: / revert: / deps:   -> patch   (1.1.0 -> 1.1.1)
+#   feat:                            -> minor   (1.1.0 -> 1.2.0)
+#   feat!: or a "BREAKING CHANGE:" footer -> major (1.1.0 -> 2.0.0)
+#   docs: / chore: / ci: / test: / refactor: / build: / style: -> no release
+#
+# That pull request bumps pyproject.toml, CITATION.cff and codemeta.json and
+# writes the CHANGELOG entry. Merging it tags vX.Y.Z, creates the GitHub release,
+# and starts publish.yml, which uploads to PyPI.
+#
+# Settings this needs (Settings -> Actions -> General -> Workflow permissions):
+# "Allow GitHub Actions to create and approve pull requests" must be on.
+#
+# Optional: a RELEASE_PLEASE_TOKEN secret (a fine-grained token with contents and
+# pull-requests write on this repository). Pull requests opened with the default
+# GITHUB_TOKEN do not trigger other workflows, so without it the release pull
+# request gets no CI run. With or without it, publishing works: the job below
+# starts publish.yml itself, because a release created by GITHUB_TOKEN would not.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # to start publish.yml
+    steps:
+      # Pinned to a commit, not a tag: this job can write to the repository and
+      # start the PyPI upload, so the code it runs must not change under it.
+      # v5.0.0 differs from v4.4.1 only in running on Node 24.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Publish the release to PyPI
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

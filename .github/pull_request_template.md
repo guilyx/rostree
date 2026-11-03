@@ -10,7 +10,7 @@
 
 - [ ] Tests pass: `pytest`
 - [ ] Lint passes: `ruff check src tests examples`, `black --check src tests examples`
-- [ ] `CHANGELOG.md` has an entry under `[Unreleased]`
+- [ ] The title is a Conventional Commit written for users — it becomes the changelog line and decides the version bump
 - [ ] Docs updated if user-visible behaviour changed (`mkdocs build --strict` passes)
 - [ ] No incompatible change to the CLI or `rostree.api` (or it has a deprecation path)
 - [ ] If AI tools helped write this, it says which ones above

@@ -4,7 +4,7 @@
   "name": "rostree",
   "description": "Explore and analyse ROS 2 package dependency graphs: a Python library, a CLI, a terminal UI and a self-contained interactive HTML graph.",
   "version": "1.0.0",
-  "datePublished": "2026-08-11",
+  "datePublished": "2026-02-05",
   "codeRepository": "https://github.com/guilyx/rostree",
   "url": "https://guilyx.github.io/rostree",
   "issueTracker": "https://github.com/guilyx/rostree/issues",
