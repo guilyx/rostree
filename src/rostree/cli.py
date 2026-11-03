@@ -17,6 +17,12 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
+from rostree.core.analysis import (
+    dependency_versions,
+    dependents,
+    diff_dependencies,
+    shortest_paths,
+)
 from rostree.core.filters import (
     DEP_TYPE_CHOICES,
     FilterReport,
@@ -386,7 +392,7 @@ def cmd_why(args: argparse.Namespace) -> int:
         package_filter=_package_filter(args),
         report=report,
     )
-    paths = _shortest_paths(graph, args.package, args.dependency, limit=args.limit)
+    paths = shortest_paths(graph, args.package, args.dependency, limit=args.limit)
 
     if not paths:
         if args.json:
@@ -444,55 +450,8 @@ def cmd_why(args: argparse.Namespace) -> int:
     return 0
 
 
-def _shortest_paths(
-    graph: DependencyGraph,
-    start: str,
-    target: str,
-    *,
-    limit: int = 10,
-) -> list[list[str]]:
-    """All shortest dependency paths from start to target (breadth-first)."""
-    if start == target:
-        return [[start]]
-    from collections import deque
-
-    parents: dict[str, set[str]] = {}
-    depth: dict[str, int] = {start: 0}
-    queue: deque[str] = deque([start])
-    found_depth: int | None = None
-
-    while queue:
-        node = queue.popleft()
-        if found_depth is not None and depth[node] >= found_depth:
-            continue
-        for dep in graph.edges.get(node, ()):
-            if dep not in depth:
-                depth[dep] = depth[node] + 1
-                parents.setdefault(dep, set()).add(node)
-                if dep == target:
-                    found_depth = depth[dep]
-                else:
-                    queue.append(dep)
-            elif depth[dep] == depth[node] + 1:
-                parents.setdefault(dep, set()).add(node)
-
-    if target not in depth:
-        return []
-
-    paths: list[list[str]] = []
-
-    def walk_back(node: str, tail: list[str]) -> None:
-        if len(paths) >= limit:
-            return
-        if node == start:
-            paths.append([start] + tail)
-            return
-        for parent in sorted(parents.get(node, ())):
-            if depth.get(parent, -1) == depth[node] - 1:
-                walk_back(parent, [node] + tail)
-
-    walk_back(target, [])
-    return paths[:limit]
+# Published from here before the analysis moved into rostree.core.analysis.
+_shortest_paths = shortest_paths
 
 
 def cmd_rdeps(args: argparse.Namespace) -> int:
@@ -504,31 +463,22 @@ def cmd_rdeps(args: argparse.Namespace) -> int:
         return 1
 
     tags = _dep_tags(args)
+    # Reading every manifest is the slow part. Do it here, under the spinner;
+    # the result is cached on the index, so dependents() below reuses it.
     if _err.is_terminal and not args.json:
         with _err.status("[dim]Reading manifests…[/]", spinner="dots"):
-            reverse = index.reverse_dependencies(include_tags=tags)
-    else:
-        reverse = index.reverse_dependencies(include_tags=tags)
+            index.reverse_dependencies(include_tags=tags)
 
-    direct = sorted(reverse.get(args.package, ()))
-    if args.transitive:
-        seen: set[str] = set()
-        frontier = list(direct)
-        while frontier:
-            name = frontier.pop()
-            if name in seen:
-                continue
-            seen.add(name)
-            frontier.extend(reverse.get(name, ()))
-        names = sorted(seen)
-    else:
-        names = direct
-
-    # Filtered after the walk, deliberately: "who breaks if this changes" must
-    # still follow an excluded package to the dependents behind it, or --exclude
-    # would hide exactly the breakage the command exists to find.
+    # Filtered after the walk, deliberately — see core.analysis.dependents.
     report = FilterReport()
-    names = _package_filter(args).filter_names(names, index, report)
+    names = dependents(
+        index,
+        args.package,
+        transitive=args.transitive,
+        include_tags=tags,
+        package_filter=_package_filter(args),
+        report=report,
+    )
 
     if args.json:
         print(
@@ -666,15 +616,41 @@ def _dependency_set(
         package_filter=_package_filter(args),
         report=report,
     )
-    versions = {name: info.version for name, info in graph.packages.items()}
-    for name in graph.missing:
-        versions[name] = ""
-    versions.pop(package, None)
-    return versions
+    return dependency_versions(graph, exclude=[package])
 
 
-def _snapshot(package: str, versions: dict[str, str]) -> dict:
-    return {"package": package, "dependencies": versions}
+def _scope(args: argparse.Namespace) -> dict:
+    """Everything that changes which dependencies a snapshot contains."""
+    return {
+        "dep_type": _dep_scope(args) or "all",
+        "depth": getattr(args, "depth", None),
+        "include": sorted(getattr(args, "include", None) or []),
+        "exclude": sorted(getattr(args, "exclude", None) or []),
+        "only_workspace": bool(getattr(args, "only_workspace", False)),
+    }
+
+
+def _snapshot(package: str, versions: dict[str, str], scope: dict | None = None) -> dict:
+    snap = {"package": package, "dependencies": versions}
+    if scope is not None:
+        snap["scope"] = scope
+    return snap
+
+
+def _warn_scope_mismatch(stored: dict, current: dict, path: str) -> None:
+    """
+    A snapshot taken under one scope, compared under another, reports the scope
+    difference as drift. Snapshots written before 1.1 carry no scope; say nothing.
+    """
+    if not isinstance(stored, dict):
+        return
+    differs = [key for key in current if key in stored and stored[key] != current[key]]
+    if differs:
+        detail = ", ".join(f"{k}: {stored[k]!r} then, {current[k]!r} now" for k in differs)
+        _err.print(
+            f"[yellow]Warning:[/] {path} was taken with a different scope ({detail}). "
+            "Some of the differences below may be that, not a change in the package."
+        )
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
@@ -689,7 +665,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
         report = FilterReport()
         versions = _dependency_set(args.package, args, index, report)
         Path(args.save).write_text(
-            json.dumps(_snapshot(args.package, versions), indent=2), encoding="utf-8"
+            json.dumps(_snapshot(args.package, versions, _scope(args)), indent=2),
+            encoding="utf-8",
         )
         _err.print(f"[dim]Wrote a snapshot of {len(versions)} dependencies to {args.save}[/]")
         _report_filtered(report)
@@ -700,9 +677,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
             stored = json.loads(Path(args.against).read_text(encoding="utf-8"))
             before_name = stored["package"]
             before = dict(stored["dependencies"])
-        except (OSError, ValueError, KeyError) as exc:
+        except (OSError, ValueError, KeyError, TypeError) as exc:
             _err.print(f"[red]Could not read snapshot {args.against}:[/] {exc}")
             return 2
+        _warn_scope_mismatch(stored.get("scope"), _scope(args), args.against)
     elif args.other:
         if index.get(args.other) is None:
             _err.print(f"[red]Package not found:[/] {args.other}")
@@ -722,43 +700,24 @@ def cmd_diff(args: argparse.Namespace) -> int:
         return 1
     report = FilterReport()
     after = _dependency_set(args.package, args, index, report)
-
-    added = sorted(set(after) - set(before))
-    removed = sorted(set(before) - set(after))
-    changed = sorted(
-        name
-        for name in set(before) & set(after)
-        if before[name] != after[name] and before[name] and after[name]
-    )
+    diff = diff_dependencies(before, after, before_name=before_name, after_name=args.package)
 
     if getattr(args, "json", False):
-        print(
-            json.dumps(
-                {
-                    "before": before_name,
-                    "after": args.package,
-                    "added": added,
-                    "removed": removed,
-                    "changed": {n: {"from": before[n], "to": after[n]} for n in changed},
-                    "filtered": sorted(report.excluded),
-                },
-                indent=2,
-            )
-        )
-        return 1 if (added or removed or changed) else 0
+        print(json.dumps({**diff.to_dict(), "filtered": sorted(report.excluded)}, indent=2))
+        return 1 if diff else 0
 
     _out.print(
         f"Comparing [bold]{before_name}[/] ({len(before)} deps) → "
         f"[bold]{args.package}[/] ({len(after)} deps)\n"
     )
-    if not (added or removed or changed):
+    if not diff:
         _out.print("[green]✓[/] No difference.")
         _report_filtered(report)
         return 0
 
     for title, names, style, sign in (
-        ("Added", added, "green", "+"),
-        ("Removed", removed, "red", "-"),
+        ("Added", diff.added, "green", "+"),
+        ("Removed", diff.removed, "red", "-"),
     ):
         if names:
             _out.print(f"[{style}]{title} ({len(names)})[/]")
@@ -771,12 +730,12 @@ def cmd_diff(args: argparse.Namespace) -> int:
                 _out.print(line)
             _out.print("")
 
-    if changed:
-        _out.print(f"[yellow]Changed ({len(changed)})[/]")
-        for name in changed:
+    if diff.changed:
+        _out.print(f"[yellow]Changed ({len(diff.changed)})[/]")
+        for name, (old, new) in diff.changed.items():
             line = Text("  ~ ", style="yellow")
             line.append(name)
-            line.append(f"  {before[name]} → {after[name]}", style="cyan")
+            line.append(f"  {old} → {new}", style="cyan")
             _out.print(line)
     _report_filtered(report)
     return 1

@@ -93,8 +93,14 @@ class DependencyNode:
             yield from child.walk()
 
     def to_dict(self) -> dict:
-        """Serialize node to a JSON-friendly dict (for API/frontend)."""
-        return {
+        """
+        Serialize node to a JSON-friendly dict (for API/frontend).
+
+        ``hidden_children`` appears only on a node that is hiding some — a depth
+        limit or node budget cut it off — so JSON consumers see the same "… N more"
+        the text output shows, and every other node keeps its existing shape.
+        """
+        data = {
             "name": self.name,
             "version": self.version,
             "description": self.description,
@@ -102,6 +108,9 @@ class DependencyNode:
             "status": self.status.value,
             "children": [c.to_dict() for c in self.children],
         }
+        if self.hidden_children:
+            data["hidden_children"] = self.hidden_children
+        return data
 
 
 @dataclass

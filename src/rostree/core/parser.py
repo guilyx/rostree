@@ -114,8 +114,13 @@ def quick_package_name(path: Path) -> str | None:
 # walking a dependency graph, so results are cached by (path, mtime, size, tags),
 # plus the variables REP 149 conditions are evaluated against: the same manifest
 # declares different dependencies under ROS_VERSION=1 and ROS_VERSION=2.
-_CacheKey = tuple[str, int, int, "tuple[str, ...] | None", tuple[str, ...]]
-_PARSE_CACHE: dict[_CacheKey, PackageInfo | None] = {}
+#
+# One entry per (manifest, tag set, context), holding the mtime and size it was
+# parsed at. Keying on mtime instead would leave every superseded parse behind
+# for the life of the process — in a TUI session that rescans after each edit,
+# that is unbounded growth. Now an edited manifest replaces its own entry.
+_CacheKey = tuple[str, "tuple[str, ...] | None", tuple[str, ...]]
+_PARSE_CACHE: dict[_CacheKey, tuple[int, int, PackageInfo | None]] = {}
 
 
 def clear_parse_cache() -> None:
@@ -144,18 +149,21 @@ def parse_package_xml(
     Returns None if the file cannot be read or is not valid package.xml.
     """
     key: _CacheKey | None = None
+    stamp = (0, 0)
     if use_cache:
         try:
             st = path.stat()
-            key = (str(path), int(st.st_mtime_ns), int(st.st_size), include_tags, context_key())
         except OSError:
             return None
-        if key in _PARSE_CACHE:
-            return _PARSE_CACHE[key]
+        key = (str(path), include_tags, context_key())
+        stamp = (int(st.st_mtime_ns), int(st.st_size))
+        cached = _PARSE_CACHE.get(key)
+        if cached is not None and cached[:2] == stamp:
+            return cached[2]
 
     info = _parse_package_xml_uncached(path, include_tags=include_tags)
     if key is not None:
-        _PARSE_CACHE[key] = info
+        _PARSE_CACHE[key] = (*stamp, info)
     return info
 
 

@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import rostree
 from rostree.api import (
     build_tree,
@@ -314,3 +316,137 @@ class TestScanWorkspaces:
             include_opt_ros=False,
         )
         assert isinstance(result, list)
+
+
+class TestBuildingOnTheLibrary:
+    """Everything the CLI can tell you, a script can ask for directly."""
+
+    EMPTY = {
+        "AMENT_PREFIX_PATH": "",
+        "COLCON_PREFIX_PATH": "",
+        "ROS2_WORKSPACE": "",
+        "COLCON_WORKSPACE": "",
+    }
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        from tests.conftest import write_package
+
+        write_package(tmp_path, "msgs")
+        write_package(tmp_path, "lib", depends=["msgs"])
+        write_package(tmp_path, "nav_core", depends=["lib"])
+        write_package(tmp_path, "app", depends=["nav_core", "lib"], exec_depends=["tool"])
+        write_package(tmp_path, "tool")
+        return tmp_path
+
+    def _env(self):
+        return mock.patch.dict(os.environ, self.EMPTY, clear=False)
+
+    def test_every_public_name_resolves(self) -> None:
+        from rostree import api
+
+        assert [n for n in api.__all__ if not hasattr(api, n)] == []
+
+    def test_build_tree_with_scope_and_filter(self, ws: Path) -> None:
+        from rostree.api import FilterReport, PackageFilter, build_tree
+
+        report = FilterReport()
+        with self._env():
+            tree = build_tree(
+                "app",
+                extra_source_roots=[ws],
+                package_filter=PackageFilter(exclude=("lib",)),
+                report=report,
+            )
+        assert [c.name for c in tree.children] == ["nav_core", "tool"]
+        assert report.excluded == {"lib"}
+
+    def test_dep_type_selects_tags(self, ws: Path) -> None:
+        from rostree.api import build_graph
+
+        with self._env():
+            build_only = build_graph("app", extra_source_roots=[ws], dep_type="build")
+            runtime = build_graph("app", extra_source_roots=[ws], dep_type="runtime")
+        assert "tool" not in build_only.edges["app"]  # exec_depend only
+        assert "tool" in runtime.edges["app"]
+
+    def test_unknown_dep_type_is_an_error_not_a_silent_default(self, ws: Path) -> None:
+        from rostree.api import build_graph
+
+        with pytest.raises(ValueError):
+            build_graph("app", extra_source_roots=[ws], dep_type="runtim")
+
+    def test_dependency_paths_is_rostree_why(self, ws: Path) -> None:
+        from rostree.api import dependency_paths
+
+        with self._env():
+            paths = dependency_paths("app", "msgs", extra_source_roots=[ws])
+        assert paths == [["app", "lib", "msgs"]]
+
+    def test_transitive_reverse_dependencies(self, ws: Path) -> None:
+        from rostree.api import reverse_dependencies
+
+        with self._env():
+            assert reverse_dependencies("msgs", extra_source_roots=[ws]) == ["lib"]
+            assert reverse_dependencies("msgs", extra_source_roots=[ws], transitive=True) == [
+                "app",
+                "lib",
+                "nav_core",
+            ]
+
+    def test_snapshot_and_diff(self, ws: Path) -> None:
+        from rostree.api import build_graph, dependency_versions, diff_dependencies
+        from tests.conftest import write_package
+
+        with self._env():
+            before = dependency_versions(
+                build_graph("nav_core", extra_source_roots=[ws]), exclude=["nav_core"]
+            )
+            write_package(ws, "nav_core", depends=["lib", "tool"])
+            after = dependency_versions(
+                build_graph("nav_core", extra_source_roots=[ws]), exclude=["nav_core"]
+            )
+        diff = diff_dependencies(before, after)
+        assert diff.added == ["tool"] and not diff.removed
+
+    def test_rendering_is_public(self, ws: Path) -> None:
+        from rostree.api import GraphView, build_graph, to_dot, to_html, to_mermaid
+
+        with self._env():
+            graph = build_graph("app", extra_source_roots=[ws])
+        view = GraphView.from_graph(graph)
+        assert to_dot(view).startswith("digraph")
+        assert to_mermaid(view).startswith("graph")
+        assert to_html(graph).lstrip().lower().startswith("<!doctype html>")
+
+    def test_include_buildtool_warns_that_it_does_nothing(self, ws: Path) -> None:
+        from rostree.api import build_tree
+
+        with self._env(), pytest.warns(DeprecationWarning, match="no effect"):
+            build_tree("app", extra_source_roots=[ws], include_buildtool=True)
+
+
+class TestJsonCarriesHiddenChildren:
+    def test_only_on_nodes_that_hide_some(self) -> None:
+        from rostree.core.tree import DependencyNode, NodeStatus
+
+        cut = DependencyNode("a", "1", "", "/a", status=NodeStatus.TRUNCATED, hidden_children=3)
+        whole = DependencyNode("b", "1", "", "/b")
+        assert cut.to_dict()["hidden_children"] == 3
+        assert "hidden_children" not in whole.to_dict()
+
+
+class TestParseCacheIsBounded:
+    def test_an_edited_manifest_replaces_its_entry(self, tmp_path: Path) -> None:
+        """Keyed on mtime, every superseded parse used to stay for the process's life."""
+        from rostree.core import parser
+        from tests.conftest import write_package
+
+        manifest = write_package(tmp_path, "pkg")
+        parser.clear_parse_cache()
+        for version in ("1.0.0", "1.1.0", "1.2.0"):
+            write_package(tmp_path, "pkg", version=version)
+            st = manifest.stat()
+            os.utime(manifest, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+            assert parser.parse_package_xml(manifest).version == version
+        assert len([k for k in parser._PARSE_CACHE if k[0] == str(manifest)]) == 1
