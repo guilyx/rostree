@@ -390,17 +390,43 @@ def cmd_why(args: argparse.Namespace) -> int:
 
     if not paths:
         if args.json:
-            print(json.dumps({"from": args.package, "to": args.dependency, "paths": []}))
+            print(
+                json.dumps(
+                    {
+                        "from": args.package,
+                        "to": args.dependency,
+                        "paths": [],
+                        "filtered": sorted(report.excluded),
+                    }
+                )
+            )
         else:
+            # Name the scope that was searched: this used to say "runtime
+            # dependencies only" for --dep-type build and test as well.
+            limits = []
+            if _dep_scope(args):
+                limits.append(f"{_dep_scope(args)} dependencies only")
+            if args.depth is not None:
+                limits.append(f"within depth {args.depth}")
             _out.print(
                 f"[yellow]{args.package}[/] does not depend on [yellow]{args.dependency}[/]"
-                + (" (runtime dependencies only)" if _dep_tags(args) else "")
+                + (f" ({', '.join(limits)})" if limits else "")
             )
             _report_filtered(report)
         return 1
 
     if args.json:
-        print(json.dumps({"from": args.package, "to": args.dependency, "paths": paths}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "from": args.package,
+                    "to": args.dependency,
+                    "paths": paths,
+                    "filtered": sorted(report.excluded),
+                },
+                indent=2,
+            )
+        )
         return 0
 
     _out.print(
@@ -414,6 +440,7 @@ def cmd_why(args: argparse.Namespace) -> int:
                 line.append(" → ", style="dim")
             line.append(name, style="bold" if i in (0, len(path) - 1) else "default")
         _out.print(line)
+    _report_filtered(report)
     return 0
 
 
@@ -497,17 +524,28 @@ def cmd_rdeps(args: argparse.Namespace) -> int:
     else:
         names = direct
 
-    package_filter = _package_filter(args)
-    if not package_filter.is_noop:
-        report = FilterReport()
-        names = package_filter.filter_names(names, index, report)
+    # Filtered after the walk, deliberately: "who breaks if this changes" must
+    # still follow an excluded package to the dependents behind it, or --exclude
+    # would hide exactly the breakage the command exists to find.
+    report = FilterReport()
+    names = _package_filter(args).filter_names(names, index, report)
 
     if args.json:
-        print(json.dumps({"package": args.package, "dependents": names}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "package": args.package,
+                    "dependents": names,
+                    "filtered": sorted(report.excluded),
+                },
+                indent=2,
+            )
+        )
         return 0
 
     if not names:
         _out.print(f"Nothing depends on [bold]{args.package}[/] in this environment.")
+        _report_filtered(report)
         return 0
 
     scope = "transitively" if args.transitive else "directly"
@@ -520,6 +558,7 @@ def cmd_rdeps(args: argparse.Namespace) -> int:
         if entry and args.verbose:
             line.append(f"  {entry.kind.value}", style="dim")
         _out.print(line)
+    _report_filtered(report)
     return 0
 
 
@@ -541,15 +580,22 @@ def cmd_check(args: argparse.Namespace) -> int:
             )
             return 2
 
+    report = FilterReport()
     graph = build_dependency_graph(
         roots,
         include_tags=_dep_tags(args),
         index=index,
         package_filter=_package_filter(args),
+        report=report,
     )
     cycles = graph.cycles()
     missing = sorted(graph.missing)
+    ignored: list[str] = []
     if args.ignore_system:
+        # A guess, and a CI gate must not guess silently: an unbuilt ROS package
+        # with no underscore in its name (rclcpp, tf2, urdf, xacro) is dropped by
+        # it too. So whatever it holds back is always listed.
+        ignored = [m for m in missing if "_" not in m]
         missing = [m for m in missing if "_" in m]
 
     junit = getattr(args, "junit", None)
@@ -565,6 +611,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                     "packages": len(graph.packages),
                     "cycles": cycles,
                     "unresolved": missing,
+                    "ignored": ignored,
+                    "filtered": sorted(report.excluded),
                 },
                 indent=2,
             )
@@ -592,6 +640,14 @@ def cmd_check(args: argparse.Namespace) -> int:
     else:
         _out.print("[green]✓[/] Every dependency resolves to a package.")
 
+    if ignored:
+        shown = ", ".join(ignored[:8]) + (
+            f", and {len(ignored) - 8} more" if len(ignored) > 8 else ""
+        )
+        _err.print(
+            f"[dim]{len(ignored)} unresolved name(s) not counted (--ignore-system): {shown}[/]"
+        )
+    _report_filtered(report)
     return 1 if (cycles or missing) else 0
 
 
@@ -599,6 +655,7 @@ def _dependency_set(
     package: str,
     args: argparse.Namespace,
     index: PackageIndex,
+    report: FilterReport | None = None,
 ) -> dict[str, str]:
     """Every package reachable from ``package``, mapped to its version."""
     graph = build_dependency_graph(
@@ -607,6 +664,7 @@ def _dependency_set(
         include_tags=_dep_tags(args),
         index=index,
         package_filter=_package_filter(args),
+        report=report,
     )
     versions = {name: info.version for name, info in graph.packages.items()}
     for name in graph.missing:
@@ -628,14 +686,18 @@ def cmd_diff(args: argparse.Namespace) -> int:
             _err.print(f"[red]Package not found:[/] {args.package}")
             _suggest(args.package, index)
             return 1
-        versions = _dependency_set(args.package, args, index)
-        Path(args.save).write_text(json.dumps(_snapshot(args.package, versions), indent=2))
+        report = FilterReport()
+        versions = _dependency_set(args.package, args, index, report)
+        Path(args.save).write_text(
+            json.dumps(_snapshot(args.package, versions), indent=2), encoding="utf-8"
+        )
         _err.print(f"[dim]Wrote a snapshot of {len(versions)} dependencies to {args.save}[/]")
+        _report_filtered(report)
         return 0
 
     if args.against:
         try:
-            stored = json.loads(Path(args.against).read_text())
+            stored = json.loads(Path(args.against).read_text(encoding="utf-8"))
             before_name = stored["package"]
             before = dict(stored["dependencies"])
         except (OSError, ValueError, KeyError) as exc:
@@ -658,7 +720,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
         _err.print(f"[red]Package not found:[/] {args.package}")
         _suggest(args.package, index)
         return 1
-    after = _dependency_set(args.package, args, index)
+    report = FilterReport()
+    after = _dependency_set(args.package, args, index, report)
 
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))
@@ -677,6 +740,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
                     "added": added,
                     "removed": removed,
                     "changed": {n: {"from": before[n], "to": after[n]} for n in changed},
+                    "filtered": sorted(report.excluded),
                 },
                 indent=2,
             )
@@ -689,6 +753,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     )
     if not (added or removed or changed):
         _out.print("[green]✓[/] No difference.")
+        _report_filtered(report)
         return 0
 
     for title, names, style, sign in (
@@ -713,6 +778,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
             line.append(name)
             line.append(f"  {before[name]} → {after[name]}", style="cyan")
             _out.print(line)
+    _report_filtered(report)
     return 1
 
 
@@ -785,8 +851,19 @@ def _generate_mermaid(
     return to_mermaid(GraphView.from_trees(roots, title=title), highlight_roots=highlight_roots)
 
 
-def _get_workspace_packages(workspace_path: Path | None = None) -> list[str]:
-    """Get packages from a workspace. If None, use current environment."""
+def _get_workspace_packages(
+    workspace_path: Path | None = None,
+    *,
+    index: PackageIndex | None = None,
+) -> list[str]:
+    """
+    Packages to graph when none is named: a workspace's, or the environment's own.
+
+    Pass the ``index`` the command already built. Without it this used to build
+    a second one that knew nothing of ``-s`` roots, so their packages were never
+    graphed. And it selects by source kind rather than by finding "System" in a
+    label, which dropped any workspace whose path contained the word.
+    """
     if workspace_path:
         ws_path = Path(workspace_path).resolve()
         src_path = ws_path / "src" if (ws_path / "src").exists() else ws_path
@@ -795,13 +872,9 @@ def _get_workspace_packages(workspace_path: Path | None = None) -> list[str]:
         from rostree.core.finder import _list_packages_in_src
 
         return _list_packages_in_src(src_path)
-    by_source = list_packages_by_source()
-    packages = []
-    for label, names in by_source.items():
-        # Only include Workspace and Source packages, not System
-        if "System" not in label:
-            packages.extend(names)
-    return packages
+    if index is None:
+        index = get_index()
+    return index.workspace_names()
 
 
 def _check_graphviz() -> bool:
@@ -902,7 +975,9 @@ def _render_dot(dot_content: str, output_path: Path, format: str) -> bool:
             [_resolve_tool("dot"), f"-T{format}", "-o", str(output_path)],
             input=dot_content,
             capture_output=True,
-            text=True,
+            # Explicit, not the locale's: a workspace name in the title can be
+            # non-ASCII, and under LANG=C the default codec cannot encode it.
+            encoding="utf-8",
             timeout=120,
         )
         if result.returncode != 0:
@@ -972,12 +1047,20 @@ def cmd_graph(args: argparse.Namespace) -> int:
             print(f"No packages found in workspace: {args.workspace}", file=sys.stderr)
             return 1
     else:
-        packages_to_graph = _get_workspace_packages(None)
+        packages_to_graph = _get_workspace_packages(None, index=index)
         if not packages_to_graph:
             print(
                 "No workspace packages found. Specify a package or use --workspace.",
                 file=sys.stderr,
             )
+            return 1
+
+    if not args.package:
+        # Same as `check`: a workspace-wide graph starts from the packages the
+        # filter allows, not from every package and then filters their edges.
+        packages_to_graph = _package_filter(args).filter_names(packages_to_graph, index)
+        if not packages_to_graph:
+            _err.print("[yellow]No workspace packages match the filters.[/]")
             return 1
 
     if len(packages_to_graph) > GRAPH_MAX_PACKAGES and not args.package:
@@ -996,25 +1079,25 @@ def cmd_graph(args: argparse.Namespace) -> int:
         depth = GRAPH_DEFAULT_DEPTH  # Limited for workspace-wide
 
     # One breadth-first pass over the whole DAG, rather than one tree per package.
-    if _err.is_terminal:
-        with _err.status("[dim]Resolving dependencies…[/]", spinner="dots"):
-            graph = build_dependency_graph(
-                packages_to_graph,
-                max_depth=depth,
-                include_tags=_dep_tags(args),
-                extra_source_roots=extra_roots,
-                index=index,
-                package_filter=_package_filter(args),
-            )
-    else:
-        graph = build_dependency_graph(
+    report = FilterReport()
+
+    def resolve() -> DependencyGraph:
+        return build_dependency_graph(
             packages_to_graph,
             max_depth=depth,
             include_tags=_dep_tags(args),
             extra_source_roots=extra_roots,
             index=index,
             package_filter=_package_filter(args),
+            report=report,
         )
+
+    if _err.is_terminal:
+        with _err.status("[dim]Resolving dependencies…[/]", spinner="dots"):
+            graph = resolve()
+    else:
+        graph = resolve()
+    _report_filtered(report)
 
     if not graph.edges:
         print("No valid package trees found.", file=sys.stderr)
@@ -1105,7 +1188,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
         return 0
 
     if getattr(args, "output", None):
-        Path(args.output).write_text(output)
+        Path(args.output).write_text(output, encoding="utf-8")
         print(f"Graph written to: {args.output}", file=sys.stderr)
     else:
         print(output)
@@ -1164,11 +1247,19 @@ def _write_html_graph(
     return 0
 
 
-def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    """Flags accepted both before and after the subcommand."""
+def _add_global_args(parser: argparse.ArgumentParser, *, subcommand: bool = False) -> None:
+    """
+    Flags accepted both before and after the subcommand.
+
+    On a subparser the default must be SUPPRESS. argparse copies a subparser's
+    defaults over the namespace the main parser already filled in, so with a
+    plain False default, ``rostree --no-color tree x`` set the flag and then
+    silently unset it again — only ``rostree tree x --no-color`` ever worked.
+    """
     parser.add_argument(
         "--no-color",
         action="store_true",
+        default=argparse.SUPPRESS if subcommand else False,
         help="Disable coloured output (NO_COLOR is honoured too)",
     )
 
@@ -1247,6 +1338,16 @@ def _report_filtered(report: FilterReport) -> None:
     """Say what a filter held back, so the output never quietly lies."""
     if report:
         _err.print(f"[dim]{report.summary()}[/]")
+
+
+def _dep_scope(args: argparse.Namespace) -> str | None:
+    """The --dep-type in force, by name, or None when every dependency is followed."""
+    dep_type = getattr(args, "dep_type", None)
+    if dep_type and dep_type != "all":
+        return dep_type
+    if not dep_type and getattr(args, "runtime", False):
+        return "runtime"
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1408,7 +1509,10 @@ def main(argv: list[str] | None = None) -> int:
     check_parser.add_argument(
         "--ignore-system",
         action="store_true",
-        help="Ignore unresolved names that look like rosdep keys",
+        help=(
+            "Don't fail on unresolved names without an underscore, which are usually "
+            "rosdep keys (eigen, boost). What it holds back is always listed"
+        ),
     )
     _add_runtime_arg(check_parser)
     _add_source_arg(check_parser)
@@ -1518,7 +1622,7 @@ def main(argv: list[str] | None = None) -> int:
     tui_parser.set_defaults(func=cmd_tui)
 
     for subparser in subparsers.choices.values():
-        _add_global_args(subparser)
+        _add_global_args(subparser, subcommand=True)
 
     args = parser.parse_args(argv)
     _configure_console(args)

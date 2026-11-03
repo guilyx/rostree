@@ -26,6 +26,7 @@ from rostree.cli import (
     cmd_tree,
     main,
 )
+from rostree.core.index import PackageEntry, PackageIndex, SourceKind
 from rostree.core.tree import DependencyGraph, DependencyNode, build_dependency_graph
 from tests.conftest import make_ros_workspace, write_package
 
@@ -1492,20 +1493,39 @@ class TestGetWorkspacePackages:
         result = _get_workspace_packages(nonexistent)
         assert result == []
 
-    def test_workspace_filters_system_packages(self) -> None:
-        """Test that system packages are filtered out."""
+    @staticmethod
+    def _index(*entries: tuple[str, SourceKind, str]) -> PackageIndex:
+        return PackageIndex(
+            entries={
+                name: PackageEntry(
+                    name=name,
+                    manifest=Path(f"{origin}/{name}/package.xml"),
+                    kind=kind,
+                    origin=Path(origin),
+                    label=f"{kind.value.title()} ({origin})",
+                )
+                for name, kind, origin in entries
+            }
+        )
 
-        mock_packages = {
-            "Workspace": ["pkg1", "pkg2"],
-            "System": ["system_pkg"],
-            "Source": ["src_pkg"],
-        }
-        with mock.patch("rostree.cli.list_packages_by_source", return_value=mock_packages):
-            result = _get_workspace_packages(None)
-            assert "pkg1" in result
-            assert "pkg2" in result
-            assert "src_pkg" in result
-            assert "system_pkg" not in result
+    def test_workspace_filters_system_packages(self) -> None:
+        """The distro's packages are not graphed; workspace and source ones are."""
+        index = self._index(
+            ("pkg1", SourceKind.WORKSPACE, "/ws/install"),
+            ("pkg2", SourceKind.WORKSPACE, "/ws/install"),
+            ("system_pkg", SourceKind.SYSTEM, "/opt/ros/jazzy"),
+            ("src_pkg", SourceKind.SOURCE, "/ws/src"),
+        )
+        result = _get_workspace_packages(None, index=index)
+        assert sorted(result) == ["pkg1", "pkg2", "src_pkg"]
+
+    def test_a_workspace_path_containing_system_is_not_dropped(self) -> None:
+        """Selection used to test for "System" in the label, i.e. in the path."""
+        index = self._index(
+            ("my_pkg", SourceKind.WORKSPACE, "/home/me/SystemTests_ws/install"),
+            ("rclcpp", SourceKind.SYSTEM, "/opt/ros/jazzy"),
+        )
+        assert _get_workspace_packages(None, index=index) == ["my_pkg"]
 
 
 class TestRenderDotErrors:
