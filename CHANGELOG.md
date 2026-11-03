@@ -1,11 +1,20 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file, and rostree
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+From 1.1.0 on, each release's entry is written by
+[release-please](https://github.com/googleapis/release-please) from the
+[Conventional Commits](https://www.conventionalcommits.org/) titles of the pull
+requests it contains, and the version bump follows from them — see
+[Releases](https://github.com/guilyx/rostree/blob/main/CONTRIBUTING.md#releases).
+Entries up to 1.0.0, and the longer notes on 1.1.0 below, were written by hand in
+the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [Unreleased]
+## 1.1.0 in detail
+
+release-please writes the summary of 1.1.0 above this section when it cuts the
+release. What follows is the same release explained for someone using rostree.
 
 ### Added
 - The `docs/` folder is now published as a documentation site at
@@ -66,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Snapshots written by 1.0 are still accepted.
 
 ### Changed
+- **Releases are automated.** Every pull request is squash-merged as one
+  Conventional Commit, and release-please keeps a release pull request open that
+  bumps the version accordingly — `fix:` a patch, `feat:` a minor version, `!` a
+  major one — and writes this changelog. Merging it tags the release, creates the
+  GitHub release and publishes to PyPI. A check rejects pull request titles that
+  are not Conventional Commits, since the title is what decides the bump.
 - Pre-commit runs ruff, black and bandit from the `dev` extra — the versions CI
   pins — instead of its own copies, which had drifted (ruff 0.8 locally, 0.16 in
   CI). It now checks `examples/` too, and accepts the `ci:`, `perf:`, `build:`

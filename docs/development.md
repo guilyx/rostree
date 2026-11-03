@@ -129,9 +129,41 @@ not a stale suppression.
 
 - **ci.yml** — lint (ruff, black, bandit) plus pytest with coverage on Python 3.10–3.12.
 - **docs.yml** — build the site with `--strict`, and deploy it to GitHub Pages from `main`.
+- **pr-title.yml** — check that a pull request's title is a Conventional Commit.
+- **release-please.yml** — keep the release pull request up to date; when it is
+  merged, tag the release and start publish.yml.
 - **publish.yml** — Build and publish to PyPI on release (Trusted Publishing).
 
 CI runs on every push/PR to main/master.
+
+## Releases
+
+Versions are never bumped by hand. Pull requests are squash-merged, so each one
+is a single [Conventional Commit](https://www.conventionalcommits.org/) on
+`main` whose subject is the pull request title, and
+[release-please](https://github.com/googleapis/release-please) derives the next
+version from them: `fix:` is a patch, `feat:` a minor version, `!` or a
+`BREAKING CHANGE:` footer a major one, and `docs:`, `chore:`, `ci:`, `test:`,
+`refactor:`, `build:` and `style:` do not release on their own.
+[CONTRIBUTING.md](https://github.com/guilyx/rostree/blob/main/CONTRIBUTING.md#releases)
+has the table.
+
+The release pull request updates `pyproject.toml`, the `version` and
+`date-released` lines of `CITATION.cff` (marked `x-release-please-version` and
+`x-release-please-date`), `codemeta.json` and `CHANGELOG.md`. Its configuration
+is `release-please-config.json`, and `.release-please-manifest.json` records the
+last released version. Merging it tags `vX.Y.Z` and creates the GitHub release;
+`release-please.yml` then starts `publish.yml` on that tag. A release made with
+the default `GITHUB_TOKEN` would not trigger `publish.yml` on its own.
+
+Two repository settings this relies on:
+
+- **Actions may open pull requests** — Settings → Actions → General → Workflow
+  permissions → *Allow GitHub Actions to create and approve pull requests*.
+- **Squash merges use the pull request title** — Settings → General → Pull
+  Requests → *Allow squash merging* → default message *Pull request title*.
+  Otherwise a single-commit pull request lands with that commit's message, and
+  the title that was checked is not the one release-please reads.
 
 ## Tests
 

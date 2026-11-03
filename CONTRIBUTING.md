@@ -55,12 +55,15 @@ pins in the `dev` extra.
 - **A test that fails without it.** For a bug, the test reproduces the bug. For
   a CLI change, drive `rostree.cli.main([...])` end to end so the argument wiring
   is tested too (see `tests/test_cli_behaviour.py`).
-- **A CHANGELOG entry** under `[Unreleased]`, written for someone using rostree,
-  not for someone reading the diff.
+- **A title that works as a changelog line.** Pull requests are squash-merged,
+  so the title becomes the commit on `main`, the line in the changelog and the
+  reason for the version bump (see [Releases](#releases)). Use
+  [Conventional Commits](https://www.conventionalcommits.org/) and write it for
+  someone using rostree, not for someone reading the diff:
+  `fix(cli): honour --no-color after the subcommand`, not `fix: flag parsing`.
+  A check on the pull request rejects a title that is not a Conventional Commit.
 - **Docs**, if behaviour a user can see changed.
-- **[Conventional Commits](https://www.conventionalcommits.org/)** for commit
-  messages and the pull request title: `fix:`, `feat:`, `docs:`, `refactor:`,
-  `test:`, `chore:`, `ci:`, `perf:`. The pre-commit hook checks it.
+- You do not edit `CHANGELOG.md` or the version: the release pull request does.
 
 ## Where things go
 
@@ -75,6 +78,26 @@ In short:
 | Reading `package.xml` | `src/rostree/core/parser.py`, `core/conditions.py` |
 | The browser graph | `src/rostree/web/` and `core/webview.py` — no network access, ever |
 | A tool built on the library | `examples/`, with a test in `tests/test_examples.py` |
+
+## Releases
+
+Releases are automated with
+[release-please](https://github.com/googleapis/release-please). After every
+merge to `main` it reads the commits since the last release and keeps one
+`chore(main): release X.Y.Z` pull request up to date, with the version bump and
+the changelog entry already written. The type in each merged title decides the
+bump:
+
+| Title | Release |
+|---|---|
+| `fix:`, `perf:`, `revert:`, `deps:` | patch — 1.1.0 → 1.1.1 |
+| `feat:` | minor — 1.1.0 → 1.2.0 |
+| `feat!:`, `fix!:`, … or a `BREAKING CHANGE:` footer | major — 1.1.0 → 2.0.0 |
+| `docs:`, `refactor:`, `test:`, `build:`, `ci:`, `chore:`, `style:` | none on its own; included in the next release |
+
+The highest bump among the merged pull requests wins. A maintainer merges the
+release pull request when it is time to ship; that tags `vX.Y.Z`, creates the
+GitHub release and publishes to PyPI.
 
 ## Compatibility
 
