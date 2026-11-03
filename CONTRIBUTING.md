@@ -39,9 +39,9 @@ These are what CI runs:
 
 ```bash
 pytest                                     # the whole suite, ~10 s
-ruff check src tests examples
-black --check src tests examples
-bandit -c pyproject.toml -r src tests examples
+ruff check src tests examples scripts
+black --check src tests examples scripts
+bandit -c pyproject.toml -r src tests examples scripts
 mkdocs build --strict                      # if you touched docs/, README or examples/
 ```
 
@@ -63,7 +63,8 @@ pins in the `dev` extra.
   `fix(cli): honour --no-color after the subcommand`, not `fix: flag parsing`.
   A check on the pull request rejects a title that is not a Conventional Commit.
 - **Docs**, if behaviour a user can see changed.
-- You do not edit `CHANGELOG.md` or the version: the release pull request does.
+- You never edit the version. Notes for users go under `## [Unreleased]` in
+  `CHANGELOG.md` if the change deserves more than its title; they are optional.
 
 ## Where things go
 
@@ -81,23 +82,26 @@ In short:
 
 ## Releases
 
-Releases are automated with
-[release-please](https://github.com/googleapis/release-please). After every
-merge to `main` it reads the commits since the last release and keeps one
-`chore(main): release X.Y.Z` pull request up to date, with the version bump and
-the changelog entry already written. The type in each merged title decides the
-bump:
+There is no release step. When a pull request is merged into `main`, the release
+workflow reads the titles of every pull request merged since the last release and,
+if one of them calls for it, releases straight away — version bump, changelog
+entry, tag, PyPI and GitHub release — with nobody to approve anything:
 
 | Title | Release |
 |---|---|
 | `fix:`, `perf:`, `revert:`, `deps:` | patch — 1.1.0 → 1.1.1 |
 | `feat:` | minor — 1.1.0 → 1.2.0 |
 | `feat!:`, `fix!:`, … or a `BREAKING CHANGE:` footer | major — 1.1.0 → 2.0.0 |
-| `docs:`, `refactor:`, `test:`, `build:`, `ci:`, `chore:`, `style:` | none on its own; included in the next release |
+| `docs:`, `refactor:`, `test:`, `build:`, `ci:`, `chore:`, `style:` | none on its own; they ship with the next release |
 
-The highest bump among the merged pull requests wins. A maintainer merges the
-release pull request when it is time to ship; that tags `vX.Y.Z`, creates the
-GitHub release and publishes to PyPI.
+The highest bump wins, so a `docs:` merge followed by a `fix:` merge releases a
+patch containing both. Whatever is under `## [Unreleased]` in `CHANGELOG.md`
+becomes the release's entry, followed by the pull requests that released it; when
+nothing was written there, the entry is generated from their titles.
+
+A maintainer can also release by hand: run the *Release* workflow from the Actions
+tab with the part to bump, or push a `vX.Y.Z` tag whose version matches
+`pyproject.toml`.
 
 ## Compatibility
 

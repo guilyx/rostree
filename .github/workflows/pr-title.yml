@@ -1,7 +1,7 @@
-# The pull request title becomes the squash commit on main, and release-please
-# decides the next version from it (see release-please.yml). A title that is not
-# a Conventional Commit would be left out of the changelog and could not bump the
-# version, so it is checked here, where it is still easy to fix.
+# The release workflow (publish.yml) decides the next version from the titles of
+# the pull requests merged since the last release. A title that is not a
+# Conventional Commit releases nothing and is left out of the changelog, so it is
+# checked here, where it is still easy to fix.
 name: PR title
 
 on:

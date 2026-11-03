@@ -24,6 +24,14 @@ on:
       - '.github/workflows/docs.yml'
   # So the site can be republished without an empty commit.
   workflow_dispatch:
+  # Called by publish.yml once a release is out: its version bump is pushed with the
+  # workflow token, which starts no workflow, so the changelog page would lag behind.
+  workflow_call:
+    inputs:
+      ref:
+        description: Revision to build the site from
+        type: string
+        default: ""
 
 # One deployment at a time, and never cancel one half-way through — Pages keeps
 # serving the previous build while this runs, so there is nothing to gain by
@@ -40,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
