@@ -10,8 +10,8 @@ authors:
     family-names: Lejeune
 repository-code: "https://github.com/guilyx/rostree"
 url: "https://guilyx.github.io/rostree"
-version: 1.0.0
-date-released: "2026-08-11"
+version: 1.1.0
+date-released: "2026-11-03"
 abstract: >-
   rostree resolves the dependency graph of ROS 2 packages from package.xml
   manifests and answers questions about it: what a package depends on, why it

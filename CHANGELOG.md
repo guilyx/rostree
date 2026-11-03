@@ -13,6 +13,8 @@ nothing was written there, an entry generated from their titles. See
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
 ### Added
 - The `docs/` folder is now published as a documentation site at
   <https://guilyx.github.io/rostree>, built with MkDocs and Material and deployed
@@ -173,6 +175,12 @@ on 1.0.0.
   leaving the header describing one scope over a tree of the other.
 - Graph and snapshot files, and DOT piped to Graphviz, are read and written as
   UTF-8 explicitly rather than in the locale's encoding.
+
+### Pull requests
+
+- **api:** make rostree a library others can build on ([#22](https://github.com/guilyx/rostree/pull/22))
+- **cli:** global --no-color, report every filter, honest --ignore-system ([#21](https://github.com/guilyx/rostree/pull/21))
+- **core:** honour REP 149 conditions, find the distro anywhere, stop mislabelling depth-limited packages ([#20](https://github.com/guilyx/rostree/pull/20))
 
 ## [1.0.0] - 2026-08-10
 
@@ -501,7 +509,8 @@ them near-instant and reworks the interface around them.
 - Python 3.10+
 - textual >= 0.47.0
 
-[Unreleased]: https://github.com/guilyx/rostree/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/guilyx/rostree/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/guilyx/rostree/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/guilyx/rostree/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/guilyx/rostree/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guilyx/rostree/compare/v0.2.2...v0.3.0
