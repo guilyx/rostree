@@ -36,6 +36,25 @@ rostree                               # interactive TUI
 
     `package.xml` parsing, the package index, and why repeats are collapsed.
 
+-   **[The algorithms](algorithms.md)**
+
+    Eight algorithms behind rostree, each from the question it answers to the
+    lines of code that answer it — with a command to see it run.
+
+-   **[Build on rostree](extending.md)**
+
+    The library's layers, and four complete tools built on them: an architecture
+    rule for CI, a ripple report, a dependency lock, a CSV export.
+
+-   **[rostree and other tools](related-tools.md)**
+
+    What `colcon graph`, `ros2 pkg` and `rosdep` already do, and what rostree adds.
+
+-   **[Publication](publication.md)**
+
+    We intend to publish rostree as a software paper: the venues, the plan, and
+    what has to happen first.
+
 -   **[Development](development.md)**
 
     Layout, pre-commit, CI, static analysis, and the HTML viewer.

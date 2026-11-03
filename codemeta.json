@@ -1,0 +1,36 @@
+{
+  "@context": "https://w3id.org/codemeta/3.0",
+  "@type": "SoftwareSourceCode",
+  "name": "rostree",
+  "description": "Explore and analyse ROS 2 package dependency graphs: a Python library, a CLI, a terminal UI and a self-contained interactive HTML graph.",
+  "version": "1.0.0",
+  "datePublished": "2026-08-11",
+  "codeRepository": "https://github.com/guilyx/rostree",
+  "url": "https://guilyx.github.io/rostree",
+  "issueTracker": "https://github.com/guilyx/rostree/issues",
+  "readme": "https://github.com/guilyx/rostree/blob/main/README.md",
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python 3.10+",
+  "operatingSystem": ["Linux", "macOS", "Windows"],
+  "developmentStatus": "active",
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Erwin",
+      "familyName": "Lejeune"
+    }
+  ],
+  "keywords": [
+    "ROS 2",
+    "robotics",
+    "dependency analysis",
+    "software engineering",
+    "graph algorithms",
+    "visualization"
+  ],
+  "softwareRequirements": [
+    "textual>=0.47.0",
+    "rich>=13.0",
+    "defusedxml>=0.7"
+  ]
+}

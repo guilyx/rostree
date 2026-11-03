@@ -156,6 +156,15 @@ print(graph.cycles(), sorted(graph.missing))
 print(reverse_dependencies("rclcpp"))    # who depends on it
 ```
 
+### Build on it
+
+rostree is meant to be built on. [Build on rostree](docs/extending.md) walks
+through the layers and four complete tools that use them — an architecture rule
+for CI, a ripple report, a dependency lock and a CSV export — all in
+[`examples/`](examples/) and all run by the test suite.
+[The algorithms](docs/algorithms.md) explains each algorithm underneath, from
+the question it answers to the code that answers it.
+
 ## Stability
 
 From 1.0, the **CLI commands and their flags** and the names exported from
@@ -179,5 +188,9 @@ yours is not.
 - [How packages are found](docs/package-discovery.md) (workspaces, AMENT_PREFIX_PATH, COLCON_WORKSPACE)
 - [Dependency trees](docs/dependency-trees.md) (package.xml, the package index, repeat collapsing)
 - [Usage](docs/usage.md) (CLI, TUI keys, API)
+- [The algorithms](docs/algorithms.md) (DAG vs tree, BFS, shortest paths, cycles, layout, conditions)
+- [Build on rostree](docs/extending.md) (the library's layers, with worked examples)
+- [rostree and other tools](docs/related-tools.md) (colcon graph, ros2 pkg, rosdep)
+- [Publication](docs/publication.md) (our intent to publish a software paper, and how to cite rostree)
 - [Development](docs/development.md) (layout, pre-commit, CI)
 - [Changelog](CHANGELOG.md)
