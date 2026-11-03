@@ -52,7 +52,11 @@ nav:
       - Overview: overview.md
       - Package discovery: package-discovery.md
       - Dependency trees: dependency-trees.md
+      - The algorithms: algorithms.md
+  - Build on rostree: extending.md
   - Project:
+      - rostree and other tools: related-tools.md
+      - Publication: publication.md
       - Development: development.md
       - Roadmap: roadmap.md
       - Changelog: changelog.md
@@ -66,7 +70,13 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      # Diagrams on the docs site only. The HTML graph viewer stays free of any
+      # network dependency; this site is already online by definition.
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite

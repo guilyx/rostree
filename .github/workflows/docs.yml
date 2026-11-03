@@ -10,6 +10,7 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'CHANGELOG.md'          # embedded into docs/changelog.md as a snippet
+      - 'examples/**'           # embedded into docs/extending.md as snippets
       - 'pyproject.toml'        # carries the `docs` extra
       - '.github/workflows/docs.yml'
   pull_request:
@@ -18,6 +19,7 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'CHANGELOG.md'
+      - 'examples/**'
       - 'pyproject.toml'
       - '.github/workflows/docs.yml'
   # So the site can be republished without an empty commit.

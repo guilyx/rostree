@@ -18,6 +18,7 @@ rostree/
 │   ├── cli.py            # Command line interface
 │   ├── web/              # graph.html/.css/.js — the viewer, shipped as data
 │   └── tui/              # Textual TUI
+├── examples/             # Tools built on rostree.api, embedded in the docs and run by the tests
 ├── tests/                # pytest (incl. TUI pilot tests)
 ├── pyproject.toml
 ├── .pre-commit-config.yaml
@@ -82,7 +83,7 @@ Bandit also runs in `ci.yml` and pre-commit, so a finding lands next to the lint
 failures instead of only in a dashboard:
 
 ```bash
-bandit -c pyproject.toml -r src tests
+bandit -c pyproject.toml -r src tests examples
 ```
 
 `.codacy.yaml` and `[tool.bandit]` are kept in step with each other; changing one

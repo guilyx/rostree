@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requests that touch the docs get the build as a check but do not deploy.
 - `docs/changelog.md` embeds this file rather than restating it, so the changelog
   is still written in exactly one place.
+- **Documentation for people who want to build on rostree, or learn from it.**
+  - *The algorithms* explains the eight algorithms rostree is made of — expand
+    once, breadth-first resolution with a depth frontier, all shortest paths,
+    reverse dependencies, three-colour cycle detection, layered graph layout and
+    REP 149 condition evaluation — each from the question it answers, through
+    why the obvious approach fails, to the code and a command that shows it.
+  - *Build on rostree* shows the library's layers and four complete programs in
+    a new `examples/` folder: an architecture rule for CI that prints the chain
+    that breaks it, a ripple report, a dependency lock for code review and a CSV
+    export. The test suite runs each one, so the docs cannot drift from the code.
+  - *rostree and other tools* says what `colcon graph`, `colcon list`,
+    `ros2 pkg`, `rosdep` and `rqt_dep` do, and what rostree adds.
+  - *Publication* records the intent to publish rostree as a software paper:
+    candidate venues, what the paper would describe, and what has to happen
+    first.
+- `CITATION.cff` and `codemeta.json`, so GitHub's "Cite this repository" and
+  archives such as Zenodo can cite a specific version.
 
 - **rostree is now a library you can build on, not just a CLI.** `why`,
   transitive `rdeps` and `diff` lived inside the CLI, interleaved with printing,
