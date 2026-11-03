@@ -1,5 +1,5 @@
 # See https://pre-commit.com for usage
-# Install: pre-commit install && pre-commit install --hook-type commit-msg
+# Install: pip install -e ".[dev]" && pre-commit install && pre-commit install --hook-type commit-msg
 
 default_language_version:
   python: python3
@@ -11,32 +11,35 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: [feat, fix, chore, docs, style, refactor, test]
+        args: [feat, fix, chore, docs, style, refactor, test, ci, perf, build, revert]
 
-  # Ruff (library + backend)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
+  # Ruff, black and bandit run from the environment, not from pre-commit's own
+  # copies: the versions are pinned once, in the `dev` extra of pyproject.toml,
+  # and CI installs the same extra. A separate `rev:` here drifted before —
+  # pre-commit ran ruff 0.8 while CI ran 0.16 — so a commit that passed locally
+  # could still fail CI.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
-        files: ^(src/|tests/|rosdep_viz_webapp/backend/)
+        name: ruff
+        entry: ruff check --fix
+        language: system
+        types: [python]
+        files: ^(src|tests|examples)/
 
-  # Black (library + backend)
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
       - id: black
-        language_version: python3
-        args: [--line-length=100]
-        files: ^(src/|tests/|rosdep_viz_webapp/backend/)
+        name: black
+        entry: black
+        language: system
+        types: [python]
+        files: ^(src|tests|examples)/
 
-  # Bandit — the same security scan Codacy runs on pull requests.
-  # src/ only: tests/ is excluded from this tool (see .codacy.yaml for why), and
-  # pre-commit passes files explicitly, which would bypass [tool.bandit].
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.4
-    hooks:
+      # The same security scan Codacy runs on pull requests. tests/ is excluded
+      # from this tool (see .codacy.yaml for why); pre-commit passes files
+      # explicitly, which would bypass [tool.bandit]'s exclude_dirs.
       - id: bandit
-        args: [-c, pyproject.toml]
-        additional_dependencies: ["bandit[toml]"]
-        files: ^src/
+        name: bandit
+        entry: bandit -c pyproject.toml
+        language: system
+        types: [python]
+        files: ^(src|examples)/

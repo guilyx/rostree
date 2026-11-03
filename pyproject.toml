@@ -24,6 +24,13 @@ dependencies = [
     "defusedxml>=0.7",
 ]
 
+[project.urls]
+Homepage = "https://github.com/guilyx/rostree"
+Documentation = "https://guilyx.github.io/rostree/"
+Repository = "https://github.com/guilyx/rostree"
+Issues = "https://github.com/guilyx/rostree/issues"
+Changelog = "https://github.com/guilyx/rostree/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 viz = [
     "networkx>=3.0",

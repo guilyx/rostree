@@ -41,16 +41,25 @@ Dev extras: pytest, pytest-cov, ruff, black, bandit.
 Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/) (e.g. `fix:`, `feat:`, `chore:`). Pre-commit runs ruff and black and enforces that.
 
 ```bash
-pip install pre-commit
+pip install -e ".[dev]" pre-commit
 pre-commit install
 pre-commit install --hook-type commit-msg
 ```
 
-- **Ruff** — Lint and fix (src, tests). The enabled rule set is pinned in
-  `[tool.ruff.lint]` and the version is pinned in the `dev` extra, so a new ruff
-  release cannot silently change what CI enforces.
+- **Ruff** — Lint and fix (src, tests, examples). The enabled rule set is pinned
+  in `[tool.ruff.lint]` and the version is pinned in the `dev` extra, so a new
+  ruff release cannot silently change what CI enforces.
 - **Black** — Format (line-length 100).
+- **Bandit** — The security scan Codacy runs (src, examples).
 - **conventional-pre-commit** — Commit message prefix check (commit-msg hook).
+
+Ruff, black and bandit are `local` hooks: they run the versions installed from the
+`dev` extra, the same ones CI installs, rather than copies pinned separately in
+`.pre-commit-config.yaml`. Separate pins drifted once — pre-commit ran ruff 0.8
+while CI ran 0.16.
+
+How changes are proposed and reviewed is in
+[CONTRIBUTING.md](https://github.com/guilyx/rostree/blob/main/CONTRIBUTING.md).
 
 ## Static analysis
 

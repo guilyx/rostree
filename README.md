@@ -182,6 +182,22 @@ item. 1.0 means the interface has settled, not that every layout in the wild is
 covered — [please open an issue](https://github.com/guilyx/rostree/issues) if
 yours is not.
 
+## Contributing
+
+Bug reports, ideas, docs fixes and code are all welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). The single most useful thing you can send is a
+[workspace report](https://github.com/guilyx/rostree/issues/new?template=workspace_report.yml):
+how rostree did on a real workspace, right or wrong. Everyone taking part follows
+the [Code of Conduct](CODE_OF_CONDUCT.md); security issues go through
+[SECURITY.md](SECURITY.md), not a public issue.
+
+## Citing
+
+We intend to publish rostree as a software paper — the plan is in
+[docs/publication.md](docs/publication.md). Until then, cite the software: GitHub's
+**Cite this repository** button reads [`CITATION.cff`](CITATION.cff). Please
+include the version you used.
+
 ## Links
 
 - [How the system works](docs/overview.md)

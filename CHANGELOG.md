@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     first.
 - `CITATION.cff` and `codemeta.json`, so GitHub's "Cite this repository" and
   archives such as Zenodo can cite a specific version.
+- **Ready for outside contributors**: `CONTRIBUTING.md` (setup, what CI runs,
+  where a change goes, the compatibility promise), a Code of Conduct (Contributor
+  Covenant 2.1), `SECURITY.md` (private reporting, and what rostree does and does
+  not trust), issue forms for bugs, feature requests and *workspace reports* —
+  how rostree did on a real workspace — and a pull request template.
+- `pyproject.toml` lists the documentation, issue tracker and changelog, so PyPI
+  links to them from the next release.
 
 - **rostree is now a library you can build on, not just a CLI.** `why`,
   transitive `rdeps` and `diff` lived inside the CLI, interleaved with printing,
@@ -59,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Snapshots written by 1.0 are still accepted.
 
 ### Changed
+- Pre-commit runs ruff, black and bandit from the `dev` extra — the versions CI
+  pins — instead of its own copies, which had drifted (ruff 0.8 locally, 0.16 in
+  CI). It now checks `examples/` too, and accepts the `ci:`, `perf:`, `build:`
+  and `revert:` commit types.
 - The demo reel was re-shot as a live session rather than a reconstruction.
   A `bash` session runs in a pty, commands are typed into it a character at a
   time, and every byte it writes back is recorded with a timestamp; playback
